@@ -444,15 +444,17 @@ export default function ThingsView({
 		setFrame(0);
 	}, [detail, animateEnabled]);
 
-	const shown = useMemo(() => {
-		if (!things) return [];
+	// A search doesn't filter the grid — it jumps to the first matching thing.
+	const matchFn = useMemo(() => {
 		const q = search.trim();
-		if (!q) return things;
+		if (!q) return null;
 		const byId = parseIdSearch(q);
-		if (byId) return things.filter(t => byId(t.id));
+		if (byId) return (t: ThingSummary) => byId(t.id);
 		const needle = q.toLowerCase();
-		return things.filter(t => t.name?.toLowerCase().includes(needle));
-	}, [things, search]);
+		return (t: ThingSummary) => !!t.name?.toLowerCase().includes(needle);
+	}, [search]);
+
+	const shown = things ?? [];
 
 	const gridCells = useMemo(
 		() => shown.map(defaultGridCell),
@@ -470,6 +472,23 @@ export default function ThingsView({
 		const slice = gridCells.slice(r * cols, (r + 1) * cols);
 		if (slice.length > 0) visible.push({ row: r, cells: slice });
 	}
+
+	// When the search matches something, select it and scroll it into view.
+	useEffect(() => {
+		if (!matchFn || !things || cols < 1) return;
+		const idx = things.findIndex(matchFn);
+		if (idx < 0) return;
+		onSelect(things[idx].id);
+		const el = scrollRef.current;
+		if (!el) return;
+		const row = Math.floor(idx / cols);
+		const cellTop = GRID_PAD + row * cellH;
+		// Only scroll if the target row isn't already comfortably in view.
+		if (cellTop < el.scrollTop || cellTop + cellH > el.scrollTop + el.clientHeight) {
+			el.scrollTop = Math.max(0, cellTop - (el.clientHeight - cellH) / 2);
+		}
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [matchFn, things, cols, cellH]);
 
 	const gridAnimates = useMemo(
 		() => animateEnabled && gridCells.some(cell => cell.thing.frames > 1),
@@ -612,7 +631,7 @@ export default function ThingsView({
 			<div className="ss-things-body">
 				<div className="ss-grid-wrap" ref={scrollRef} onScroll={e => setScrollTop(e.currentTarget.scrollTop)}>
 					<div className="ss-grid-inner" style={{ height: totalHeight }}>
-						{shown.length === 0 && <div className="ss-grid-empty">No {category}s match the current filter.</div>}
+						{shown.length === 0 && <div className="ss-grid-empty">No {category}s to display.</div>}
 						{visible.map(({ row, cells: rowCells }) => (
 							<ThingRow
 								key={`${row}-${rowCells[0].key}-${rowCells.length}`}
