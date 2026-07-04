@@ -111,6 +111,18 @@ export async function exportThing(
 	await invoke('export_thing', { sprPath, datPath, category, id, mode, transparent, outPath });
 }
 
+/** Exports several things into one combined spritesheet PNG (sheets stacked vertically). */
+export async function exportThingsSheet(
+	sprPath: string,
+	datPath: string,
+	category: ThingCategory,
+	ids: number[],
+	transparent: boolean,
+	outPath: string
+): Promise<void> {
+	await invoke('export_things_sheet', { sprPath, datPath, category, ids, transparent, outPath });
+}
+
 export function thingUrl(
 	spr: OpenFile,
 	dat: OpenDat,

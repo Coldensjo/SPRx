@@ -115,6 +115,33 @@ fn export_thing(
     std::fs::write(&out_path, png).map_err(|e| format!("Failed to write {}: {}", out_path, e))
 }
 
+/// Exports several things into one combined spritesheet PNG: each thing's own
+/// full sheet stacked vertically. Used when multiple things are selected.
+#[tauri::command]
+fn export_things_sheet(
+    spr_state: State<SprManagerState>,
+    dat_state: State<DatManagerState>,
+    spr_path: String,
+    dat_path: String,
+    category: String,
+    ids: Vec<u32>,
+    transparent: bool,
+    out_path: String,
+) -> Result<(), String> {
+    let cat = Category::parse(&category).ok_or_else(|| format!("invalid category: {}", category))?;
+    let dat_manager = dat_state.lock().map_err(|e| format!("lock: {e}"))?;
+    let file = dat_manager.file(&dat_path)?;
+    let things: Vec<&dat::Thing> = ids
+        .iter()
+        .map(|&id| file.thing(cat, id).ok_or_else(|| format!("unknown {} id {}", category, id)))
+        .collect::<Result<_, _>>()?;
+
+    let mut spr_manager = spr_state.lock().map_err(|e| format!("lock: {e}"))?;
+    let render = dat::compose_things_sheet(&mut spr_manager, &spr_path, &things, transparent)?;
+    let png = dat::encode_png(&render)?;
+    std::fs::write(&out_path, png).map_err(|e| format!("Failed to write {}: {}", out_path, e))
+}
+
 #[tauri::command]
 fn export_sprites(
     state: State<SprManagerState>,
@@ -226,6 +253,7 @@ pub fn run() {
             get_things,
             get_thing,
             export_thing,
+            export_things_sheet,
             export_sprites,
             probe_pair
         ])

@@ -764,6 +764,10 @@ button {
 	user-select: none;
 }
 
+.ss-grid-wrap-painting {
+	user-select: none;
+}
+
 .ss-marquee {
 	position: absolute;
 	z-index: 5;

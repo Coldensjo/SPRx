@@ -3,6 +3,7 @@ import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialo
 import { Copy, FileImage, Grid3X3, Loader2, Pause, Play, Search, X, ZoomIn, ZoomOut } from 'lucide-react';
 import {
 	exportThing,
+	exportThingsSheet,
 	getThing,
 	getThings,
 	OpenDat,
@@ -499,6 +500,20 @@ export default function ThingsView({
 	const geomRef = useRef({ cols, cellW, cellH, count: gridCells.length });
 	geomRef.current = { cols, cellW, cellH, count: gridCells.length };
 
+	// The id of the cell under a point (in ss-grid-inner coordinates), or null.
+	const cellIdAt = useCallback((x: number, y: number): number | null => {
+		const { cols: gc, cellW: gw, cellH: gh, count } = geomRef.current;
+		const col = Math.floor((x - GRID_PAD) / gw);
+		const row = Math.floor((y - GRID_PAD) / gh);
+		if (col < 0 || col >= gc || row < 0) return null;
+		const idx = row * gc + col;
+		if (idx < 0 || idx >= count) return null;
+		return orderedIdsRef.current[idx];
+	}, []);
+
+	// ---- Plain click-drag "paint" selection (additive, never deselects) ----
+	const [painting, setPainting] = useState(false);
+
 	const handleCellMouseDown = useCallback(
 		(e: React.MouseEvent, id: number) => {
 			if (e.button !== 0) return;
@@ -529,7 +544,11 @@ export default function ThingsView({
 					return next;
 				});
 			} else {
+				// Plain press: select this one and begin a paint-drag. Moving the
+				// cursor over more cells adds them; re-crossing never removes.
+				e.preventDefault();
 				setSelectedIds(new Set([id]));
+				setPainting(true);
 			}
 			setAnchorId(id);
 			onSelect(id);
@@ -571,13 +590,41 @@ export default function ThingsView({
 			setMarquee({ x0: x, y0: y, x1: x, y1: y });
 			setDragging(true);
 		} else {
-			// A plain click on empty grid space clears the selection.
+			// A plain press on empty grid space clears the selection and starts a
+			// paint-drag from nothing (dragging into cells then adds them).
 			const target = e.target as HTMLElement;
 			if (target === el || target.classList.contains('ss-grid-inner')) {
 				setSelectedIds(new Set());
+				setPainting(true);
 			}
 		}
 	}, []);
+
+	useEffect(() => {
+		if (!painting) return;
+		const el = scrollRef.current;
+		if (!el) return;
+		const onMove = (ev: MouseEvent) => {
+			const rect = el.getBoundingClientRect();
+			const x = ev.clientX - rect.left + el.scrollLeft;
+			const y = ev.clientY - rect.top + el.scrollTop;
+			const id = cellIdAt(x, y);
+			if (id === null) return;
+			setSelectedIds(prev => {
+				if (prev.has(id)) return prev;
+				const next = new Set(prev);
+				next.add(id);
+				return next;
+			});
+		};
+		const onUp = () => setPainting(false);
+		window.addEventListener('mousemove', onMove);
+		window.addEventListener('mouseup', onUp);
+		return () => {
+			window.removeEventListener('mousemove', onMove);
+			window.removeEventListener('mouseup', onUp);
+		};
+	}, [painting, cellIdAt]);
 
 	useEffect(() => {
 		if (!dragging) return;
@@ -735,6 +782,26 @@ export default function ThingsView({
 		[doExport, spr.path, dat.path, category, transparent, showToast]
 	);
 
+	// Exports every selected thing into a single combined spritesheet PNG,
+	// each thing's own sheet stacked vertically.
+	const exportCombinedSheet = useCallback(async () => {
+		const ids = [...selectedIdsRef.current].sort((a, b) => a - b);
+		if (ids.length === 0) return;
+		const out = await saveDialog({
+			defaultPath: `${category}_${ids.length}_sheet.png`,
+			filters: [{ name: 'PNG image', extensions: ['png'] }]
+		});
+		if (!out) return;
+		setExporting(true);
+		try {
+			await exportThingsSheet(spr.path, dat.path, category, ids, transparent, out);
+			showToast('ok', `Exported ${ids.length} ${category}s to a combined spritesheet`);
+		} catch (e) {
+			showToast('error', String(e));
+		}
+		setExporting(false);
+	}, [spr.path, dat.path, category, transparent, showToast]);
+
 	if (loadError) {
 		return (
 			<div className="ss-loading">
@@ -839,6 +906,15 @@ export default function ThingsView({
 							<Grid3X3 size={14} />
 							Export sheet
 						</button>
+						<button
+							className="ss-btn"
+							disabled={exporting}
+							onClick={() => void exportCombinedSheet()}
+							title="Export all selected things into one combined spritesheet PNG"
+						>
+							<Grid3X3 size={14} />
+							Combined sheet
+						</button>
 						<button className="ss-btn" onClick={() => setSelectedIds(new Set())} title="Clear selection">
 							<X size={14} />
 							Clear
@@ -849,7 +925,7 @@ export default function ThingsView({
 
 			<div className="ss-things-body">
 				<div
-					className={`ss-grid-wrap${dragging ? ' ss-grid-wrap-dragging' : ''}`}
+					className={`ss-grid-wrap${dragging ? ' ss-grid-wrap-dragging' : ''}${painting ? ' ss-grid-wrap-painting' : ''}`}
 					ref={scrollRef}
 					onScroll={e => setScrollTop(e.currentTarget.scrollTop)}
 					onMouseDown={handleGridMouseDown}
@@ -1033,6 +1109,10 @@ export default function ThingsView({
 							<button className="ss-menu-item" onClick={() => (setMenu(null), void exportSelected('sheet'))}>
 								<Grid3X3 size={14} />
 								Export {selectedIds.size} selected as spritesheets…
+							</button>
+							<button className="ss-menu-item" onClick={() => (setMenu(null), void exportCombinedSheet())}>
+								<Grid3X3 size={14} />
+								Export {selectedIds.size} selected as one combined spritesheet…
 							</button>
 						</>
 					) : (

@@ -1376,6 +1376,50 @@ pub fn compose_thing_sheet(
     })
 }
 
+/// Combines several things into a single spritesheet by stacking each thing's
+/// own full sheet (see [`compose_thing_sheet`]) vertically, left-aligned. The
+/// combined width is the widest individual sheet; the height is their sum.
+pub fn compose_things_sheet(
+    spr: &mut SprManager,
+    spr_path: &str,
+    things: &[&Thing],
+    transparent: bool,
+) -> Result<ThingRender, String> {
+    if things.is_empty() {
+        return Err("Nothing to export".to_string());
+    }
+
+    let sheets: Vec<ThingRender> = things
+        .iter()
+        .map(|t| compose_thing_sheet(spr, spr_path, t, transparent))
+        .collect::<Result<_, _>>()?;
+
+    let total_w = sheets.iter().map(|s| s.width_px as usize).max().unwrap_or(0);
+    let total_h: usize = sheets.iter().map(|s| s.height_px as usize).sum();
+    if total_w * total_h > 64 * 1024 * 1024 {
+        return Err("Combined spritesheet would be too large".to_string());
+    }
+
+    let mut out = vec![0u8; total_w * total_h * 4];
+    let mut oy = 0usize;
+    for s in &sheets {
+        let sw = s.width_px as usize;
+        let sh = s.height_px as usize;
+        for y in 0..sh {
+            let src = y * sw * 4;
+            let dst = ((oy + y) * total_w) * 4;
+            out[dst..dst + sw * 4].copy_from_slice(&s.rgba[src..src + sw * 4]);
+        }
+        oy += sh;
+    }
+
+    Ok(ThingRender {
+        width_px: total_w as u32,
+        height_px: total_h as u32,
+        rgba: out,
+    })
+}
+
 pub fn encode_png(render: &ThingRender) -> Result<Vec<u8>, String> {
     use std::io::Cursor;
     let img = image::RgbaImage::from_raw(render.width_px, render.height_px, render.rgba.clone())
