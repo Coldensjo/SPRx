@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { save as saveDialog } from '@tauri-apps/plugin-dialog';
+import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { Copy, FileImage, Grid3X3, Loader2, Pause, Play, Search, X, ZoomIn, ZoomOut } from 'lucide-react';
 import {
 	exportThing,
@@ -76,7 +76,8 @@ interface RowProps {
 	gridFrame: number;
 	animateEnabled: boolean;
 	selectedId: number | null;
-	onSelect: (id: number) => void;
+	selectedIds: Set<number>;
+	onCellMouseDown: (e: React.MouseEvent, id: number) => void;
 	onContextMenu: (e: React.MouseEvent, id: number) => void;
 }
 
@@ -243,7 +244,8 @@ const ThingRow = memo(function ThingRow({
 	gridFrame,
 	animateEnabled,
 	selectedId,
-	onSelect,
+	selectedIds,
+	onCellMouseDown,
 	onContextMenu
 }: RowProps) {
 	const things = cells.map(cell => cell.thing);
@@ -265,10 +267,12 @@ const ThingRow = memo(function ThingRow({
 			{cells.map((cell, i) => (
 				<div
 					key={cell.key}
-					className={`ss-cell ${selectedId === cell.thing.id ? 'ss-cell-selected' : ''}`}
+					className={`ss-cell${selectedIds.has(cell.thing.id) ? ' ss-cell-selected' : ''}${
+						selectedId === cell.thing.id ? ' ss-cell-primary' : ''
+					}`}
 					style={{ width: cellW, height: cellH }}
 					title={cell.title}
-					onMouseDown={e => e.button === 0 && onSelect(cell.thing.id)}
+					onMouseDown={e => onCellMouseDown(e, cell.thing.id)}
 					onContextMenu={e => onContextMenu(e, cell.thing.id)}
 				>
 					{hasMissileDirectionGrids ? (
@@ -364,10 +368,19 @@ export default function ThingsView({
 	const [showAllMissileDirections, setShowAllMissileDirections] = useState(false);
 	const [gridFrame, setGridFrame] = useState(0);
 
+	// Multi-selection. `selectedIds` is the full set; `anchorId` is the pivot
+	// for shift-range selection; `selectedId` (from props) stays the primary
+	// item shown in the details pane.
+	const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+	const [anchorId, setAnchorId] = useState<number | null>(null);
+	const [exporting, setExporting] = useState(false);
+
 	useEffect(() => {
 		setAnimateEnabled(defaultAnimateEnabled(category));
 		setShowAllMissileDirections(false);
 		setPlaying(true);
+		setSelectedIds(new Set());
+		setAnchorId(null);
 	}, [category]);
 
 	const scrollRef = useRef<HTMLDivElement>(null);
@@ -473,6 +486,143 @@ export default function ThingsView({
 		if (slice.length > 0) visible.push({ row: r, cells: slice });
 	}
 
+	// The grid order used for shift-range and Ctrl+A; kept in a ref so the
+	// selection handlers can stay referentially stable (ThingRow is memoized).
+	const orderedIds = useMemo(() => shown.map(t => t.id), [shown]);
+	const orderedIdsRef = useRef(orderedIds);
+	orderedIdsRef.current = orderedIds;
+	const anchorRef = useRef<number | null>(null);
+	anchorRef.current = anchorId;
+	const selectedIdsRef = useRef(selectedIds);
+	selectedIdsRef.current = selectedIds;
+	// Grid geometry for rubber-band hit-testing, read at drag time.
+	const geomRef = useRef({ cols, cellW, cellH, count: gridCells.length });
+	geomRef.current = { cols, cellW, cellH, count: gridCells.length };
+
+	const handleCellMouseDown = useCallback(
+		(e: React.MouseEvent, id: number) => {
+			if (e.button !== 0) return;
+			// Alt starts a rubber-band on the grid instead; let that handler run.
+			if (e.altKey) return;
+			const ids = orderedIdsRef.current;
+			const additive = e.ctrlKey || e.metaKey;
+			if (e.shiftKey && anchorRef.current !== null) {
+				const a = ids.indexOf(anchorRef.current);
+				const b = ids.indexOf(id);
+				if (a >= 0 && b >= 0) {
+					const [lo, hi] = a < b ? [a, b] : [b, a];
+					const range = ids.slice(lo, hi + 1);
+					setSelectedIds(prev => {
+						const next = additive ? new Set(prev) : new Set<number>();
+						for (const x of range) next.add(x);
+						return next;
+					});
+				}
+				onSelect(id);
+				return; // keep the anchor so the range can be re-dragged
+			}
+			if (additive) {
+				setSelectedIds(prev => {
+					const next = new Set(prev);
+					if (next.has(id)) next.delete(id);
+					else next.add(id);
+					return next;
+				});
+			} else {
+				setSelectedIds(new Set([id]));
+			}
+			setAnchorId(id);
+			onSelect(id);
+		},
+		[onSelect]
+	);
+
+	// Ctrl/Cmd+A selects everything; Escape clears the selection.
+	useEffect(() => {
+		const onKey = (e: KeyboardEvent) => {
+			const tag = (document.activeElement?.tagName || '').toLowerCase();
+			if (tag === 'input' || tag === 'textarea') return;
+			if ((e.ctrlKey || e.metaKey) && (e.key === 'a' || e.key === 'A')) {
+				e.preventDefault();
+				setSelectedIds(new Set(orderedIdsRef.current));
+			} else if (e.key === 'Escape') {
+				setSelectedIds(new Set());
+			}
+		};
+		window.addEventListener('keydown', onKey);
+		return () => window.removeEventListener('keydown', onKey);
+	}, []);
+
+	// ---- Alt+drag rubber-band selection ----
+	const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
+	const [dragging, setDragging] = useState(false);
+	const dragBaseRef = useRef<Set<number>>(new Set());
+
+	const handleGridMouseDown = useCallback((e: React.MouseEvent) => {
+		if (e.button !== 0) return;
+		const el = scrollRef.current;
+		if (!el) return;
+		if (e.altKey) {
+			e.preventDefault();
+			const rect = el.getBoundingClientRect();
+			const x = e.clientX - rect.left + el.scrollLeft;
+			const y = e.clientY - rect.top + el.scrollTop;
+			dragBaseRef.current = e.ctrlKey || e.metaKey ? new Set(selectedIdsRef.current) : new Set();
+			setMarquee({ x0: x, y0: y, x1: x, y1: y });
+			setDragging(true);
+		} else {
+			// A plain click on empty grid space clears the selection.
+			const target = e.target as HTMLElement;
+			if (target === el || target.classList.contains('ss-grid-inner')) {
+				setSelectedIds(new Set());
+			}
+		}
+	}, []);
+
+	useEffect(() => {
+		if (!dragging) return;
+		const el = scrollRef.current;
+		if (!el) return;
+		const onMove = (ev: MouseEvent) => {
+			const rect = el.getBoundingClientRect();
+			const x = ev.clientX - rect.left + el.scrollLeft;
+			const y = ev.clientY - rect.top + el.scrollTop;
+			setMarquee(m => (m ? { ...m, x1: x, y1: y } : m));
+		};
+		const onUp = () => {
+			setDragging(false);
+			setMarquee(null);
+		};
+		window.addEventListener('mousemove', onMove);
+		window.addEventListener('mouseup', onUp);
+		return () => {
+			window.removeEventListener('mousemove', onMove);
+			window.removeEventListener('mouseup', onUp);
+		};
+	}, [dragging]);
+
+	// Recompute the selection from the marquee rectangle as it changes.
+	useEffect(() => {
+		if (!marquee) return;
+		const { cols: gc, cellW: gw, cellH: gh, count } = geomRef.current;
+		const minX = Math.min(marquee.x0, marquee.x1);
+		const maxX = Math.max(marquee.x0, marquee.x1);
+		const minY = Math.min(marquee.y0, marquee.y1);
+		const maxY = Math.max(marquee.y0, marquee.y1);
+		const colStart = Math.max(0, Math.floor((minX - GRID_PAD) / gw));
+		const colEnd = Math.min(gc - 1, Math.floor((maxX - GRID_PAD) / gw));
+		const rowStart = Math.max(0, Math.floor((minY - GRID_PAD) / gh));
+		const rowEnd = Math.floor((maxY - GRID_PAD) / gh);
+		const next = new Set(dragBaseRef.current);
+		for (let r = rowStart; r <= rowEnd; r++) {
+			for (let c = colStart; c <= colEnd; c++) {
+				const idx = r * gc + c;
+				if (idx >= 0 && idx < count) next.add(orderedIdsRef.current[idx]);
+			}
+		}
+		setSelectedIds(next);
+	}, [marquee]);
+
 	// When the search matches something, select it and scroll it into view.
 	useEffect(() => {
 		if (!matchFn || !things || cols < 1) return;
@@ -507,6 +657,12 @@ export default function ThingsView({
 	const handleContextMenu = useCallback(
 		(e: React.MouseEvent, id: number) => {
 			e.preventDefault();
+			// Right-clicking outside the current selection collapses it onto the
+			// clicked item; right-clicking within it keeps the multi-selection.
+			if (!selectedIdsRef.current.has(id)) {
+				setSelectedIds(new Set([id]));
+				setAnchorId(id);
+			}
 			onSelect(id);
 			setMenu({ x: e.clientX, y: e.clientY, id });
 		},
@@ -542,6 +698,41 @@ export default function ThingsView({
 			}
 		},
 		[spr.path, dat.path, category, transparent, showToast]
+	);
+
+	// Exports every selected thing into a chosen folder, one PNG per id.
+	const exportSelected = useCallback(
+		async (mode: 'image' | 'sheet') => {
+			const ids = [...selectedIdsRef.current].sort((a, b) => a - b);
+			if (ids.length === 0) return;
+			if (ids.length === 1) {
+				await doExport(ids[0], mode);
+				return;
+			}
+			const dir = await openDialog({ directory: true, title: `Choose a folder for ${ids.length} PNGs` });
+			if (!dir || typeof dir !== 'string') return;
+			const sep = dir.includes('\\') ? '\\' : '/';
+			const suffix = mode === 'sheet' ? 'sheet' : 'image';
+			setExporting(true);
+			let ok = 0;
+			const failed: number[] = [];
+			for (const id of ids) {
+				try {
+					const out = `${dir}${sep}${category}_${id}_${suffix}.png`;
+					await exportThing(spr.path, dat.path, category, id, mode, transparent, out);
+					ok++;
+				} catch {
+					failed.push(id);
+				}
+			}
+			setExporting(false);
+			if (failed.length === 0) {
+				showToast('ok', `Exported ${ok} ${category}${ok !== 1 ? 's' : ''} to ${dir}`);
+			} else {
+				showToast('error', `Exported ${ok}, failed ${failed.length} (${failed.slice(0, 8).join(', ')}${failed.length > 8 ? '…' : ''})`);
+			}
+		},
+		[doExport, spr.path, dat.path, category, transparent, showToast]
 	);
 
 	if (loadError) {
@@ -626,10 +817,43 @@ export default function ThingsView({
 						<ZoomIn size={14} />
 					</button>
 				</div>
+
+				{selectedIds.size > 0 && (
+					<div className="ss-selection-bar">
+						<span className="ss-selection-count">{selectedIds.size} selected</span>
+						<button
+							className="ss-btn"
+							disabled={exporting}
+							onClick={() => void exportSelected('image')}
+							title="Export each selected thing as a PNG"
+						>
+							{exporting ? <Loader2 size={14} className="ss-spin" /> : <FileImage size={14} />}
+							Export PNG
+						</button>
+						<button
+							className="ss-btn"
+							disabled={exporting}
+							onClick={() => void exportSelected('sheet')}
+							title="Export each selected thing as a spritesheet PNG"
+						>
+							<Grid3X3 size={14} />
+							Export sheet
+						</button>
+						<button className="ss-btn" onClick={() => setSelectedIds(new Set())} title="Clear selection">
+							<X size={14} />
+							Clear
+						</button>
+					</div>
+				)}
 			</div>
 
 			<div className="ss-things-body">
-				<div className="ss-grid-wrap" ref={scrollRef} onScroll={e => setScrollTop(e.currentTarget.scrollTop)}>
+				<div
+					className={`ss-grid-wrap${dragging ? ' ss-grid-wrap-dragging' : ''}`}
+					ref={scrollRef}
+					onScroll={e => setScrollTop(e.currentTarget.scrollTop)}
+					onMouseDown={handleGridMouseDown}
+				>
 					<div className="ss-grid-inner" style={{ height: totalHeight }}>
 						{shown.length === 0 && <div className="ss-grid-empty">No {category}s to display.</div>}
 						{visible.map(({ row, cells: rowCells }) => (
@@ -648,10 +872,22 @@ export default function ThingsView({
 								gridFrame={gridFrame}
 								animateEnabled={animateEnabled}
 								selectedId={selectedId}
-								onSelect={onSelect}
+								selectedIds={selectedIds}
+								onCellMouseDown={handleCellMouseDown}
 								onContextMenu={handleContextMenu}
 							/>
 						))}
+						{marquee && (
+							<div
+								className="ss-marquee"
+								style={{
+									left: Math.min(marquee.x0, marquee.x1),
+									top: Math.min(marquee.y0, marquee.y1),
+									width: Math.abs(marquee.x1 - marquee.x0),
+									height: Math.abs(marquee.y1 - marquee.y0)
+								}}
+							/>
+						)}
 					</div>
 				</div>
 
@@ -788,15 +1024,30 @@ export default function ThingsView({
 						Copy client ID {menu.id}
 					</button>
 					<div className="ss-menu-sep" />
-					<button className="ss-menu-item" onClick={() => (setMenu(null), void doExport(menu.id, 'image'))}>
-						<FileImage size={14} />
-						Export image as PNG…
-					</button>
-					<button className="ss-menu-item" onClick={() => (setMenu(null), void doExport(menu.id, 'sheet'))}>
-						<Grid3X3 size={14} />
-						Export spritesheet ({menuThing.patternX * menuThing.layers}×
-						{menuThing.frames * menuThing.patternY * menuThing.patternZ} cells)…
-					</button>
+					{selectedIds.size > 1 && selectedIds.has(menu.id) ? (
+						<>
+							<button className="ss-menu-item" onClick={() => (setMenu(null), void exportSelected('image'))}>
+								<FileImage size={14} />
+								Export {selectedIds.size} selected as PNGs…
+							</button>
+							<button className="ss-menu-item" onClick={() => (setMenu(null), void exportSelected('sheet'))}>
+								<Grid3X3 size={14} />
+								Export {selectedIds.size} selected as spritesheets…
+							</button>
+						</>
+					) : (
+						<>
+							<button className="ss-menu-item" onClick={() => (setMenu(null), void doExport(menu.id, 'image'))}>
+								<FileImage size={14} />
+								Export image as PNG…
+							</button>
+							<button className="ss-menu-item" onClick={() => (setMenu(null), void doExport(menu.id, 'sheet'))}>
+								<Grid3X3 size={14} />
+								Export spritesheet ({menuThing.patternX * menuThing.layers}×
+								{menuThing.frames * menuThing.patternY * menuThing.patternZ} cells)…
+							</button>
+						</>
+					)}
 				</div>
 			)}
 		</>
