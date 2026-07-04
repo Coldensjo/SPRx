@@ -19,6 +19,16 @@ const ZOOM_LEVELS = [48, 64, 96, 128];
 const GRID_PAD = 8;
 const ANIM_INTERVAL_MS = 220;
 const DIRECTIONS = ['North', 'East', 'South', 'West'];
+const MISSILE_DIRECTION_LABELS: Record<string, string> = {
+	'0,0': 'NW',
+	'1,0': 'N',
+	'2,0': 'NE',
+	'0,1': 'W',
+	'2,1': 'E',
+	'0,2': 'SW',
+	'1,2': 'S',
+	'2,2': 'SE'
+};
 
 function thingAnimates(frames: number, animateEnabled: boolean): boolean {
 	return frames > 1 && animateEnabled;
@@ -56,7 +66,8 @@ interface RowProps {
 	spr: OpenFile;
 	dat: OpenDat;
 	category: ThingCategory;
-	things: ThingSummary[];
+	cells: GridCell[];
+	showAllMissileDirections: boolean;
 	top: number;
 	zoom: number;
 	cellW: number;
@@ -69,6 +80,37 @@ interface RowProps {
 	onContextMenu: (e: React.MouseEvent, id: number) => void;
 }
 
+interface GridCell {
+	key: string;
+	thing: ThingSummary;
+	label: string;
+	title: string;
+}
+
+function defaultGridCell(thing: ThingSummary): GridCell {
+	return {
+		key: String(thing.id),
+		thing,
+		label: String(thing.id),
+		title: thing.name ? `${thing.id} — ${thing.name}` : String(thing.id)
+	};
+}
+
+function missileDirectionSlots(thing: ThingSummary): Array<{ key: string; dir: number; diry: number; label: string } | null> {
+	const slots: Array<{ key: string; dir: number; diry: number; label: string } | null> = [];
+	for (let py = 0; py < thing.patternY; py++) {
+		for (let px = 0; px < thing.patternX; px++) {
+			if (thing.patternX === 3 && thing.patternY === 3 && px === 1 && py === 1) {
+				slots.push(null);
+				continue;
+			}
+			const label = MISSILE_DIRECTION_LABELS[`${px},${py}`] ?? `${px},${py}`;
+			slots.push({ key: `${px}-${py}`, dir: px, diry: py, label });
+		}
+	}
+	return slots;
+}
+
 const AnimatedThingCell = memo(function AnimatedThingCell({
 	spr,
 	dat,
@@ -76,7 +118,9 @@ const AnimatedThingCell = memo(function AnimatedThingCell({
 	thing,
 	zoom,
 	transparent,
-	frame
+	frame,
+	dir,
+	diry
 }: {
 	spr: OpenFile;
 	dat: OpenDat;
@@ -85,6 +129,8 @@ const AnimatedThingCell = memo(function AnimatedThingCell({
 	zoom: number;
 	transparent: boolean;
 	frame: number;
+	dir?: number;
+	diry?: number;
 }) {
 	const shown = frame % thing.frames;
 	return (
@@ -92,7 +138,7 @@ const AnimatedThingCell = memo(function AnimatedThingCell({
 			{Array.from({ length: thing.frames }, (_, f) => (
 				<img
 					key={f}
-					src={thingUrl(spr, dat, category, thing.id, transparent, f)}
+					src={thingUrl(spr, dat, category, thing.id, transparent, f, dir, diry)}
 					style={{ display: f === shown ? 'block' : 'none' }}
 					width={zoom}
 					height={zoom}
@@ -110,7 +156,9 @@ const StaticThingCell = memo(function StaticThingCell({
 	category,
 	thing,
 	zoom,
-	transparent
+	transparent,
+	dir,
+	diry
 }: {
 	spr: OpenFile;
 	dat: OpenDat;
@@ -118,11 +166,13 @@ const StaticThingCell = memo(function StaticThingCell({
 	thing: ThingSummary;
 	zoom: number;
 	transparent: boolean;
+	dir?: number;
+	diry?: number;
 }) {
 	return (
 		<div className="ss-cell-sprite" style={{ width: zoom, height: zoom }}>
 			<img
-				src={thingUrl(spr, dat, category, thing.id, transparent, 0)}
+				src={thingUrl(spr, dat, category, thing.id, transparent, 0, dir, diry)}
 				width={zoom}
 				height={zoom}
 				draggable={false}
@@ -132,12 +182,59 @@ const StaticThingCell = memo(function StaticThingCell({
 	);
 });
 
+const MissileDirectionGrid = memo(function MissileDirectionGrid({
+	spr,
+	dat,
+	thing,
+	zoom,
+	transparent,
+	frame,
+	animateEnabled
+}: {
+	spr: OpenFile;
+	dat: OpenDat;
+	thing: ThingSummary;
+	zoom: number;
+	transparent: boolean;
+	frame: number;
+	animateEnabled: boolean;
+}) {
+	const shownFrame = thingAnimates(thing.frames, animateEnabled) ? frame % thing.frames : 0;
+	const slots = missileDirectionSlots(thing);
+	return (
+		<div
+			className="ss-missile-dir-grid"
+			style={{
+				gridTemplateColumns: `repeat(${thing.patternX}, ${zoom}px)`,
+				gridTemplateRows: `repeat(${thing.patternY}, ${zoom}px)`
+			}}
+		>
+			{slots.map((slot, i) =>
+				slot ? (
+					<div key={slot.key} className="ss-missile-dir-cell" title={`${thing.id} ${slot.label}`}>
+						<img
+							src={thingUrl(spr, dat, 'missile', thing.id, transparent, shownFrame, slot.dir, slot.diry)}
+							width={zoom}
+							height={zoom}
+							draggable={false}
+							alt=""
+						/>
+					</div>
+				) : (
+					<div key={`empty-${i}`} className="ss-missile-dir-cell ss-missile-dir-cell-empty" />
+				)
+			)}
+		</div>
+	);
+});
+
 // One atlas image per grid row: each thing occupies a zoom×zoom square.
 const ThingRow = memo(function ThingRow({
 	spr,
 	dat,
 	category,
-	things,
+	cells,
+	showAllMissileDirections,
 	top,
 	zoom,
 	cellW,
@@ -149,34 +246,47 @@ const ThingRow = memo(function ThingRow({
 	onSelect,
 	onContextMenu
 }: RowProps) {
+	const things = cells.map(cell => cell.thing);
+	const hasMissileDirectionGrids = category === 'missile' && showAllMissileDirections;
 	const rowAnimates = animateEnabled && things.some(t => t.frames > 1);
-	const atlasUrl = rowAnimates
-		? null
-		: thingsRowUrl(
-				spr,
-				dat,
-				category,
-				things.map(t => t.id),
-				zoom,
-				transparent
-			);
+	const atlasUrl =
+		rowAnimates || hasMissileDirectionGrids
+			? null
+			: thingsRowUrl(
+					spr,
+					dat,
+					category,
+					things.map(t => t.id),
+					zoom,
+					transparent
+				);
 	return (
 		<div className="ss-grid-row" style={{ top, paddingLeft: GRID_PAD }}>
-			{things.map((t, i) => (
+			{cells.map((cell, i) => (
 				<div
-					key={t.id}
-					className={`ss-cell ${selectedId === t.id ? 'ss-cell-selected' : ''}`}
+					key={cell.key}
+					className={`ss-cell ${selectedId === cell.thing.id ? 'ss-cell-selected' : ''}`}
 					style={{ width: cellW, height: cellH }}
-					title={t.name ? `${t.id} — ${t.name}` : String(t.id)}
-					onMouseDown={e => e.button === 0 && onSelect(t.id)}
-					onContextMenu={e => onContextMenu(e, t.id)}
+					title={cell.title}
+					onMouseDown={e => e.button === 0 && onSelect(cell.thing.id)}
+					onContextMenu={e => onContextMenu(e, cell.thing.id)}
 				>
-					{rowAnimates && thingAnimates(t.frames, animateEnabled) ? (
+					{hasMissileDirectionGrids ? (
+						<MissileDirectionGrid
+							spr={spr}
+							dat={dat}
+							thing={cell.thing}
+							zoom={zoom}
+							transparent={transparent}
+							frame={gridFrame}
+							animateEnabled={animateEnabled}
+						/>
+					) : rowAnimates && thingAnimates(cell.thing.frames, animateEnabled) ? (
 						<AnimatedThingCell
 							spr={spr}
 							dat={dat}
 							category={category}
-							thing={t}
+							thing={cell.thing}
 							zoom={zoom}
 							transparent={transparent}
 							frame={gridFrame}
@@ -198,12 +308,12 @@ const ThingRow = memo(function ThingRow({
 							spr={spr}
 							dat={dat}
 							category={category}
-							thing={t}
+							thing={cell.thing}
 							zoom={zoom}
 							transparent={transparent}
 						/>
 					)}
-					<div className="ss-cell-id">{t.id}</div>
+					<div className="ss-cell-id">{cell.label}</div>
 				</div>
 			))}
 		</div>
@@ -251,10 +361,12 @@ export default function ThingsView({
 	const [frame, setFrame] = useState(0);
 	const [dir, setDir] = useState(2); // south
 	const [animateEnabled, setAnimateEnabled] = useState(() => defaultAnimateEnabled(category));
+	const [showAllMissileDirections, setShowAllMissileDirections] = useState(false);
 	const [gridFrame, setGridFrame] = useState(0);
 
 	useEffect(() => {
 		setAnimateEnabled(defaultAnimateEnabled(category));
+		setShowAllMissileDirections(false);
 		setPlaying(true);
 	}, [category]);
 
@@ -263,8 +375,9 @@ export default function ThingsView({
 	const [viewport, setViewport] = useState({ w: 0, h: 0 });
 
 	const zoom = ZOOM_LEVELS[zoomIdx];
-	const cellW = zoom + 16;
-	const cellH = zoom + 16 + 16;
+	const showMissileDirectionGrids = category === 'missile' && showAllMissileDirections;
+	const cellW = (showMissileDirectionGrids ? zoom * 3 : zoom) + 16;
+	const cellH = (showMissileDirectionGrids ? zoom * 3 : zoom) + 16 + 16;
 
 	useEffect(() => {
 		let cancelled = false;
@@ -341,21 +454,26 @@ export default function ThingsView({
 		return things.filter(t => t.name?.toLowerCase().includes(needle));
 	}, [things, search]);
 
+	const gridCells = useMemo(
+		() => shown.map(defaultGridCell),
+		[shown]
+	);
+
 	const cols = Math.max(1, Math.floor((viewport.w - GRID_PAD * 2) / cellW));
-	const rows = Math.ceil(shown.length / cols);
+	const rows = Math.ceil(gridCells.length / cols);
 	const totalHeight = rows * cellH + GRID_PAD * 2;
 	const firstRow = Math.max(0, Math.floor((scrollTop - GRID_PAD) / cellH) - 2);
 	const lastRow = Math.min(rows - 1, Math.ceil((scrollTop + viewport.h) / cellH) + 2);
 
-	const visible: { row: number; things: ThingSummary[] }[] = [];
+	const visible: { row: number; cells: GridCell[] }[] = [];
 	for (let r = firstRow; r <= lastRow; r++) {
-		const slice = shown.slice(r * cols, (r + 1) * cols);
-		if (slice.length > 0) visible.push({ row: r, things: slice });
+		const slice = gridCells.slice(r * cols, (r + 1) * cols);
+		if (slice.length > 0) visible.push({ row: r, cells: slice });
 	}
 
 	const gridAnimates = useMemo(
-		() => animateEnabled && shown.some(t => t.frames > 1),
-		[shown, animateEnabled]
+		() => animateEnabled && gridCells.some(cell => cell.thing.frames > 1),
+		[gridCells, animateEnabled]
 	);
 
 	useEffect(() => {
@@ -459,6 +577,17 @@ export default function ThingsView({
 					Animate
 				</label>
 
+				{category === 'missile' && (
+					<label className="ss-toggle">
+						<input
+							type="checkbox"
+							checked={showAllMissileDirections}
+							onChange={e => setShowAllMissileDirections(e.target.checked)}
+						/>
+						All directions
+					</label>
+				)}
+
 				<div className="ss-zoom">
 					<button
 						className="ss-zoom-btn"
@@ -484,13 +613,14 @@ export default function ThingsView({
 				<div className="ss-grid-wrap" ref={scrollRef} onScroll={e => setScrollTop(e.currentTarget.scrollTop)}>
 					<div className="ss-grid-inner" style={{ height: totalHeight }}>
 						{shown.length === 0 && <div className="ss-grid-empty">No {category}s match the current filter.</div>}
-						{visible.map(({ row, things: rowThings }) => (
+						{visible.map(({ row, cells: rowCells }) => (
 							<ThingRow
-								key={`${row}-${rowThings[0].id}-${rowThings.length}`}
+								key={`${row}-${rowCells[0].key}-${rowCells.length}`}
 								spr={spr}
 								dat={dat}
 								category={category}
-								things={rowThings}
+								cells={rowCells}
+								showAllMissileDirections={showAllMissileDirections}
 								top={GRID_PAD + row * cellH}
 								zoom={zoom}
 								cellW={cellW}
@@ -614,7 +744,7 @@ export default function ThingsView({
 				<span className="mono">sig 0x{dat.signature.toString(16).toUpperCase().padStart(8, '0')}</span>
 				<span>detected v{(dat.version / 100).toFixed(2)}</span>
 				<span className="ss-status-spacer" />
-				<span>{shown.length.toLocaleString()} shown</span>
+				<span>{gridCells.length.toLocaleString()} shown</span>
 				{selectedId !== null && <span className="mono">#{selectedId}</span>}
 			</div>
 

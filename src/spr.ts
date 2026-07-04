@@ -118,7 +118,8 @@ export function thingUrl(
 	id: number,
 	transparent: boolean,
 	frame?: number,
-	dir?: number
+	dir?: number,
+	diry?: number
 ): string {
 	const q = new URLSearchParams({
 		path: spr.path,
@@ -130,6 +131,7 @@ export function thingUrl(
 	});
 	if (frame !== undefined) q.set('frame', String(frame));
 	if (dir !== undefined) q.set('dir', String(dir));
+	if (diry !== undefined) q.set('diry', String(diry));
 	return `${protocolBase}/thing.png?${q.toString()}`;
 }
 

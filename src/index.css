@@ -751,6 +751,27 @@ button {
 	image-rendering: pixelated;
 }
 
+.ss-missile-dir-grid {
+	display: grid;
+	gap: 1px;
+	background: var(--border);
+	flex-shrink: 0;
+}
+
+.ss-missile-dir-cell {
+	background: var(--sprite-bg);
+	overflow: hidden;
+}
+
+.ss-missile-dir-cell img {
+	display: block;
+	image-rendering: pixelated;
+}
+
+.ss-missile-dir-cell-empty {
+	opacity: 0.35;
+}
+
 .ss-cell-id {
 	margin-top: 4px;
 	font-size: 11px;
