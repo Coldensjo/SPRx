@@ -6,6 +6,8 @@ Opens a `Tibia.dat` + `Tibia.spr` pair (pick either file — the sibling is foun
 
 Shares the SpriteForge theme and reuses its `.spr`/`.dat` reading code (`spr_manager.rs` / `dat_reader.rs` / `sprite_protocol.rs`, adapted), but is a fully standalone Tauri app.
 
+Thanks https://github.com/Frenvius
+
 ## Features
 
 - **Any client version, zero configuration.** The `.spr` header layout (u16 vs u32 sprite count) is detected by validating the address table; the `.dat` version (flag era 7.1–10.9x, patternZ, extended ids, frame durations, frame groups) is detected by trying each parser configuration until one consumes the file exactly to EOF.
