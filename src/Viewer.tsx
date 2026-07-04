@@ -12,6 +12,8 @@ type Category = 'all' | 'colored' | 'empty';
 
 interface Props {
 	file: OpenFile;
+	transparent: boolean;
+	onTransparentChange: (transparent: boolean) => void;
 	showToast: (kind: Toast['kind'], msg: string) => void;
 }
 
@@ -97,12 +99,11 @@ function binarySearch(arr: number[], value: number): number {
 	return -1;
 }
 
-export default function Viewer({ file, showToast }: Props) {
+export default function Viewer({ file, transparent, onTransparentChange, showToast }: Props) {
 	const [flags, setFlags] = useState<Uint8Array | null>(null);
 	const [flagsError, setFlagsError] = useState<string | null>(null);
 	const [category, setCategory] = useState<Category>('all');
 	const [search, setSearch] = useState('');
-	const [transparent, setTransparent] = useState(false);
 	const [zoomIdx, setZoomIdx] = useState(2);
 	const [selected, setSelected] = useState<Set<number>>(new Set());
 	const [anchor, setAnchor] = useState<number | null>(null);
@@ -356,7 +357,7 @@ export default function Viewer({ file, showToast }: Props) {
 				</div>
 
 				<label className="ss-toggle">
-					<input type="checkbox" checked={transparent} onChange={e => setTransparent(e.target.checked)} />
+					<input type="checkbox" checked={transparent} onChange={e => onTransparentChange(e.target.checked)} />
 					Transparency
 				</label>
 

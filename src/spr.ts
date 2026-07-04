@@ -73,6 +73,8 @@ export interface ThingDetail extends ThingSummary {
 export interface FilePair {
 	spr: string | null;
 	dat: string | null;
+	/** From sibling `.otfi`; when true, sprites use RGBA decompression. */
+	transparency?: boolean | null;
 }
 
 export async function probePair(path: string): Promise<FilePair> {

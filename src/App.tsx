@@ -32,6 +32,7 @@ export interface FileSet {
 	spr: OpenFile;
 	dat: OpenDat | null;
 	datError: string | null;
+	transparent: boolean;
 }
 
 type Tab = ThingCategory | 'sprites';
@@ -85,6 +86,7 @@ export default function App() {
 					if (files.dat) await closeDat(files.dat.path).catch(() => {});
 				}
 				const spr = await openSpr(pair.spr);
+				const transparent = pair.transparency ?? spr.extended;
 				let dat: OpenDat | null = null;
 				let datError: string | null = null;
 				if (pair.dat) {
@@ -96,7 +98,7 @@ export default function App() {
 				} else {
 					datError = 'No .dat file found next to the .spr';
 				}
-				setFiles({ spr, dat, datError });
+				setFiles({ spr, dat, datError, transparent });
 				setThingSel({});
 				setTab(dat ? 'item' : 'sprites');
 				if (datError) showToast('error', `${datError} — showing raw sprites only`);
@@ -256,7 +258,15 @@ export default function App() {
 					</div>
 
 					{tab === 'sprites' ? (
-						<Viewer file={files.spr} showToast={showToast} />
+						<Viewer
+							key={files.spr.path}
+							file={files.spr}
+							transparent={files.transparent}
+							onTransparentChange={transparent =>
+								setFiles(f => (f ? { ...f, transparent } : f))
+							}
+							showToast={showToast}
+						/>
 					) : files.dat ? (
 						<ThingsView
 							key={`${files.dat.path}-${tab}`}
@@ -265,6 +275,10 @@ export default function App() {
 							category={tab}
 							selectedId={thingSel[tab] ?? null}
 							onSelect={id => setThingSel(s => ({ ...s, [tab]: id }))}
+							transparent={files.transparent}
+							onTransparentChange={transparent =>
+								setFiles(f => (f ? { ...f, transparent } : f))
+							}
 							showToast={showToast}
 						/>
 					) : null}

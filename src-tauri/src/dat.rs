@@ -98,7 +98,7 @@ impl DatFile {
     }
 }
 
-// ---------- Flag tables (one per client-version era, from SpriteForge) ----------
+// ---------- Flag tables (one per client-version era, from ObjectBuilder) ----------
 
 #[derive(Clone, Copy)]
 enum Extra {
@@ -108,6 +108,9 @@ enum Extra {
     OffsetLegacy, // no payload, implicit 8,8
     Market,
     Bones,
+    NpcSale,
+    ChangedToExpire,
+    Cyclopedia,
     Ignored, // accepted, no payload, not recorded
 }
 
@@ -250,9 +253,6 @@ const FLAGS_V4: &[FlagSpec] = &[
     (0x1E, "lensHelp", Extra::U16),
     (0x1F, "fullGround", Extra::None),
     (0x20, "ignoreLook", Extra::None),
-    (0x24, "wrappable", Extra::None),
-    (0x25, "unwrappable", Extra::None),
-    (0x27, "bones", Extra::Bones),
 ];
 
 const FLAGS_V5: &[FlagSpec] = &[
@@ -337,6 +337,7 @@ const FLAGS_V6: &[FlagSpec] = &[
     (0xFE, "usable", Extra::None),
 ];
 
+/// Matches ObjectBuilder ThingTypeStorage reader selection (MetadataReader1–6).
 fn flags_for_version(version: u32) -> &'static [FlagSpec] {
     if version <= 730 {
         FLAGS_V1
@@ -353,7 +354,93 @@ fn flags_for_version(version: u32) -> &'static [FlagSpec] {
     }
 }
 
+/// Tibia 11+ encodes attribute ids as protobuf-style varints (decoded ThingAttr ids).
+fn attr_spec_vli(id: u32) -> Option<(&'static str, Extra)> {
+    match id {
+        255 => None,
+        0 => Some(("ground", Extra::U16)),
+        1 => Some(("groundBorder", Extra::None)),
+        2 => Some(("onBottom", Extra::None)),
+        3 => Some(("onTop", Extra::None)),
+        4 => Some(("container", Extra::None)),
+        5 => Some(("stackable", Extra::None)),
+        6 => Some(("forceUse", Extra::None)),
+        7 => Some(("multiUse", Extra::None)),
+        8 => Some(("writable", Extra::U16)),
+        9 => Some(("writableOnce", Extra::U16)),
+        10 => Some(("fluidContainer", Extra::None)),
+        11 => Some(("fluid", Extra::None)),
+        12 => Some(("unpassable", Extra::None)),
+        13 => Some(("unmoveable", Extra::None)),
+        14 => Some(("blockMissile", Extra::None)),
+        15 => Some(("blockPathfind", Extra::None)),
+        16 => Some(("noMoveAnimation", Extra::None)),
+        17 => Some(("pickupable", Extra::None)),
+        18 => Some(("hangable", Extra::None)),
+        19 => Some(("vertical", Extra::None)),
+        20 => Some(("horizontal", Extra::None)),
+        21 => Some(("rotatable", Extra::None)),
+        22 => Some(("light", Extra::U16x2)),
+        23 => Some(("dontHide", Extra::None)),
+        24 => Some(("translucent", Extra::None)),
+        25 => Some(("offset", Extra::U16x2)),
+        26 => Some(("elevation", Extra::U16)),
+        27 => Some(("lyingObject", Extra::None)),
+        28 => Some(("animateAlways", Extra::None)),
+        29 => Some(("miniMap", Extra::U16)),
+        30 => Some(("lensHelp", Extra::U16)),
+        31 => Some(("fullGround", Extra::None)),
+        32 => Some(("ignoreLook", Extra::None)),
+        33 => Some(("cloth", Extra::U16)),
+        34 => Some(("market", Extra::Market)),
+        35 => Some(("usable", Extra::None)),
+        36 => Some(("wrappable", Extra::None)),
+        37 => Some(("unwrappable", Extra::None)),
+        38 => Some(("topEffect", Extra::None)),
+        39 => Some(("upgradeClassification", Extra::U16)),
+        40 => Some(("npcSale", Extra::NpcSale)),
+        41 => Some(("changedToExpire", Extra::ChangedToExpire)),
+        42 => Some(("corpse", Extra::Ignored)),
+        43 => Some(("playerCorpse", Extra::Ignored)),
+        44 => Some(("cyclopedia", Extra::Cyclopedia)),
+        45 => Some(("ammo", Extra::Ignored)),
+        46 => Some(("showOffSocket", Extra::Ignored)),
+        47 => Some(("reportable", Extra::Ignored)),
+        48 => Some(("wearOut", Extra::Ignored)),
+        49 => Some(("clockExpire", Extra::Ignored)),
+        50 => Some(("expire", Extra::Ignored)),
+        51 => Some(("expireStop", Extra::Ignored)),
+        52 => Some(("decoKit", Extra::Ignored)),
+        100 => Some(("opacity", Extra::Ignored)),
+        101 => Some(("notPreWalkable", Extra::Ignored)),
+        251 => Some(("defaultAction", Extra::U16)),
+        252 => Some(("floorChange", Extra::Ignored)),
+        253 => Some(("noMoveAnimation", Extra::None)),
+        254 => Some(("chargeable", Extra::Ignored)),
+        _ => Some(("", Extra::Ignored)),
+    }
+}
+
 // ---------- Reader ----------
+
+/// Optional hints from a sibling `.otfi` file (Object Builder export metadata).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct OtfiSettings {
+    pub extended: Option<bool>,
+    pub transparency: Option<bool>,
+    pub frame_durations: Option<bool>,
+    pub frame_groups: Option<bool>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct DatParserConfig {
+    version: u32,
+    extended: bool,
+    frame_durations: bool,
+    frame_groups: bool,
+    /// Tibia 11+ varint-encoded attribute ids (0x80+ bytes are continuations, not flags).
+    vli_attrs: bool,
+}
 
 struct DatReader {
     reader: BufReader<File>,
@@ -361,19 +448,40 @@ struct DatReader {
     extended: bool,
     frame_durations: bool,
     frame_groups: bool,
+    vli_attrs: bool,
     file_len: u64,
 }
 
+fn version_defaults(version: u32) -> (bool, bool, bool) {
+    (
+        version >= 960,
+        version >= 1050,
+        version >= 1057,
+    )
+}
+
+fn config_for_version(version: u32, otfi: Option<&OtfiSettings>, vli_attrs: bool) -> DatParserConfig {
+    let (def_ext, def_fd, def_fg) = version_defaults(version);
+    DatParserConfig {
+        version,
+        extended: otfi.and_then(|o| o.extended).unwrap_or(def_ext),
+        frame_durations: otfi.and_then(|o| o.frame_durations).unwrap_or(def_fd),
+        frame_groups: otfi.and_then(|o| o.frame_groups).unwrap_or(def_fg),
+        vli_attrs,
+    }
+}
+
 impl DatReader {
-    fn open(path: &str, version: u32) -> Result<Self, String> {
+    fn open(path: &str, config: DatParserConfig) -> Result<Self, String> {
         let file = File::open(path).map_err(|e| format!("Failed to open DAT file: {}", e))?;
         let file_len = file.metadata().map_err(|e| e.to_string())?.len();
         Ok(Self {
             reader: BufReader::new(file),
-            version,
-            extended: version >= 960,
-            frame_durations: version >= 1050,
-            frame_groups: version >= 1057,
+            version: config.version,
+            extended: config.extended,
+            frame_durations: config.frame_durations,
+            frame_groups: config.frame_groups,
+            vli_attrs: config.vli_attrs,
             file_len,
         })
     }
@@ -403,73 +511,142 @@ impl DatReader {
         Ok(String::from_utf8_lossy(&buf).to_string())
     }
 
-    fn read_properties(&mut self, thing: &mut Thing) -> io::Result<()> {
-        let table = flags_for_version(self.version);
+    /// Protobuf-style varint used by Tibia 11+ .dat attribute ids.
+    fn read_varint_u32(&mut self) -> io::Result<u32> {
+        let mut result: u32 = 0;
+        let mut shift = 0;
         loop {
-            let flag = self.read_u8()?;
-            if flag == 0xFF {
-                break;
+            let byte = self.read_u8()?;
+            result |= ((byte & 0x7F) as u32) << shift;
+            if byte & 0x80 == 0 {
+                return Ok(result);
             }
-            let spec = table.iter().find(|(f, _, _)| *f == flag).ok_or_else(|| {
-                io::Error::new(
+            shift += 7;
+            if shift >= 35 {
+                return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
-                    format!("Unknown flag 0x{:02X} (dat version {})", flag, self.version),
-                )
-            })?;
-            let (_, name, extra) = *spec;
-            match extra {
-                Extra::None => thing.props.push(ThingProp {
-                    name: name.to_string(),
-                    value: None,
-                }),
-                Extra::Ignored => {}
-                Extra::U16 => {
-                    let v = self.read_u16()?;
+                    "Varint exceeds 32 bits",
+                ));
+            }
+        }
+    }
+
+    fn read_npc_sale(&mut self) -> io::Result<()> {
+        let count = self.read_u16()?;
+        for _ in 0..count {
+            self.read_string()?;
+            self.read_string()?;
+            self.read_u32()?;
+            self.read_u32()?;
+            self.read_u16()?;
+            self.read_string()?;
+        }
+        Ok(())
+    }
+
+    fn apply_extra(&mut self, thing: &mut Thing, name: &str, extra: Extra) -> io::Result<()> {
+        match extra {
+            Extra::None => {
+                if !name.is_empty() {
+                    thing.props.push(ThingProp {
+                        name: name.to_string(),
+                        value: None,
+                    });
+                }
+            }
+            Extra::Ignored => {}
+            Extra::U16 => {
+                let v = self.read_u16()?;
+                if !name.is_empty() {
                     thing.props.push(ThingProp {
                         name: name.to_string(),
                         value: Some(v.to_string()),
                     });
                 }
-                Extra::U16x2 => {
-                    let a = self.read_u16()?;
-                    let b = self.read_u16()?;
+            }
+            Extra::U16x2 => {
+                let a = self.read_u16()?;
+                let b = self.read_u16()?;
+                if !name.is_empty() {
                     thing.props.push(ThingProp {
                         name: name.to_string(),
                         value: Some(format!("{}, {}", a as i16, b as i16)),
                     });
                 }
-                Extra::OffsetLegacy => thing.props.push(ThingProp {
-                    name: name.to_string(),
-                    value: Some("8, 8".to_string()),
-                }),
-                Extra::Market => {
-                    let category = self.read_u16()?;
-                    let trade_as = self.read_u16()?;
-                    let show_as = self.read_u16()?;
-                    let market_name = self.read_string()?;
-                    let profession = self.read_u16()?;
-                    let level = self.read_u16()?;
-                    thing.props.push(ThingProp {
-                        name: "market".to_string(),
-                        value: Some(format!(
-                            "\"{}\" cat {} tradeAs {} showAs {} prof {} lvl {}",
-                            market_name, category, trade_as, show_as, profession, level
-                        )),
-                    });
-                    thing.name = Some(market_name);
+            }
+            Extra::OffsetLegacy => thing.props.push(ThingProp {
+                name: name.to_string(),
+                value: Some("8, 8".to_string()),
+            }),
+            Extra::Market => {
+                let category = self.read_u16()?;
+                let trade_as = self.read_u16()?;
+                let show_as = self.read_u16()?;
+                let market_name = self.read_string()?;
+                let profession = self.read_u16()?;
+                let level = self.read_u16()?;
+                thing.props.push(ThingProp {
+                    name: "market".to_string(),
+                    value: Some(format!(
+                        "\"{}\" cat {} tradeAs {} showAs {} prof {} lvl {}",
+                        market_name, category, trade_as, show_as, profession, level
+                    )),
+                });
+                thing.name = Some(market_name);
+            }
+            Extra::Bones => {
+                let mut parts = Vec::with_capacity(4);
+                for _ in 0..4 {
+                    let x = self.read_u16()? as i16;
+                    let y = self.read_u16()? as i16;
+                    parts.push(format!("({}, {})", x, y));
                 }
-                Extra::Bones => {
-                    let mut parts = Vec::with_capacity(4);
-                    for _ in 0..4 {
-                        let x = self.read_u16()? as i16;
-                        let y = self.read_u16()? as i16;
-                        parts.push(format!("({}, {})", x, y));
-                    }
-                    thing.props.push(ThingProp {
-                        name: "bones".to_string(),
-                        value: Some(parts.join(" ")),
-                    });
+                thing.props.push(ThingProp {
+                    name: "bones".to_string(),
+                    value: Some(parts.join(" ")),
+                });
+            }
+            Extra::NpcSale => {
+                self.read_npc_sale()?;
+            }
+            Extra::ChangedToExpire => {
+                self.read_u16()?;
+            }
+            Extra::Cyclopedia => {
+                self.read_u16()?;
+            }
+        }
+        Ok(())
+    }
+
+    fn read_properties(&mut self, thing: &mut Thing) -> io::Result<()> {
+        if self.vli_attrs {
+            loop {
+                let attr = self.read_varint_u32()?;
+                let Some((name, extra)) = attr_spec_vli(attr) else {
+                    break;
+                };
+                self.apply_extra(thing, name, extra)?;
+            }
+        } else {
+            let table = flags_for_version(self.version);
+            loop {
+                let flag = self.read_u8()?;
+                if flag == 0xFF {
+                    break;
                 }
+                let spec = table.iter().find(|(f, _, _)| *f == flag).ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!(
+                            "Unknown flag 0x{:02X} (dat version {}). \
+                             If this is a Tibia 11+ client, the file may use varint-encoded attributes.",
+                            flag, self.version
+                        ),
+                    )
+                })?;
+                let (_, name, extra) = *spec;
+                self.apply_extra(thing, name, extra)?;
             }
         }
         Ok(())
@@ -490,7 +667,7 @@ impl DatReader {
             let layers = self.read_u8()?;
             let pattern_x = self.read_u8()?;
             let pattern_y = self.read_u8()?;
-            let pattern_z = if self.version <= 750 { 1 } else { self.read_u8()? };
+            let pattern_z = self.read_u8()?;
             let frames = self.read_u8()?;
 
             if frames > 1 && self.frame_durations {
@@ -632,26 +809,276 @@ impl DatReader {
     }
 }
 
-/// One representative version per distinct parser behavior, newest first.
-const CANDIDATE_VERSIONS: &[u32] = &[1098, 1050, 1010, 960, 900, 780, 760, 740, 710];
+/// Dat signatures from ObjectBuilder `versions.xml` (newest version first per signature).
+const SIGNATURE_VERSIONS: &[(u32, u32)] = &[
+    (0x3DFF4B2A, 710),
+    (0x411A6233, 730),
+    (0x41BF619C, 740),
+    (0x42F81973, 750),
+    (0x437B2B8F, 755),
+    (0x439D5A33, 770),
+    (0x439D5A33, 760),
+    (0x44CE4743, 780),
+    (0x457D854E, 790),
+    (0x459E7B73, 792),
+    (0x467FD7E6, 800),
+    (0x475D3747, 810),
+    (0x47F60E37, 811),
+    (0x486905AA, 820),
+    (0x48DA1FB6, 830),
+    (0x493D607A, 840),
+    (0x49B7CC19, 841),
+    (0x49C233C9, 842),
+    (0x4A49C5EB, 850),
+    (0x4A4CC0DC, 852),
+    (0x4A4CC0DC, 850),
+    (0x4AE97492, 853),
+    (0x4AE97492, 850),
+    (0x4B1E2CAA, 854),
+    (0x4B0D46A9, 854),
+    (0x4B28B89E, 854),
+    (0x4B98FF53, 855),
+    (0x4C28B721, 860),
+    (0x4C2C7993, 860),
+    (0x4C6A4CBC, 861),
+    (0x4C973450, 862),
+    (0x4CFE22C5, 870),
+    (0x4D41979E, 871),
+    (0x4DAD1A1A, 872),
+    (0x4DBAA20B, 900),
+    (0x4E12DAFF, 910),
+    (0x4E807C08, 920),
+    (0x4EE71DE5, 940),
+    (0x4F0EEFBB, 944),
+    (0x4F105168, 944),
+    (0x4F16C0D7, 944),
+    (0x4F3131CF, 944),
+    (0x4F75B7AB, 950),
+    (0x4F75B7AB, 946),
+    (0x4F857F6C, 952),
+    (0x4FA11252, 953),
+    (0x4FD5956B, 954),
+    (0x4FFA74CC, 960),
+    (0x50226F9D, 961),
+    (0x503CB933, 963),
+    (0x5072A490, 970),
+    (0x50C70674, 980),
+    (0x50D1C5B6, 981),
+    (0x512CAD09, 982),
+    (0x51407B67, 983),
+    (0x51641A1B, 985),
+    (0x5170E904, 986),
+    (0x51E3F8C3, 1010),
+    (0x5236F129, 1020),
+    (0x526A5068, 1021),
+    (0x52A59036, 1030),
+    (0x52AED581, 1031),
+    (0x52D8D0A9, 1032),
+    (0x52E74AB5, 1034),
+    (0x52FDFC2C, 1035),
+    (0x53159C7E, 1036),
+    (0x531EA82E, 1037),
+    (0x5333C199, 1038),
+    (0x535A50AD, 1039),
+    (0x5379984D, 1040),
+    (0x5383504E, 1041),
+    (0x53B6460E, 1050),
+    (0x53C8CC17, 1051),
+    (0x53E898BD, 1052),
+    (0x53FAD76E, 1053),
+    (0x540D3A47, 1054),
+    (0x54128727, 1055),
+    (0x542143B0, 1056),
+    (0x542535F9, 1057),
+    (0x542D12E7, 1058),
+    (0x5434084B, 1059),
+    (0x5448D9C7, 1061),
+    (0x5448D9C7, 1060),
+    (0x54622638, 1062),
+    (0x546B502A, 1063),
+    (0x547F05BE, 1064),
+    (0x5481BB97, 1070),
+    (0x334F, 1071),
+    (0x3729, 1072),
+    (0x374D, 1073),
+    (0x375E, 1074),
+    (0x3775, 1075),
+    (0x37DF, 1076),
+    (0x38DE, 1077),
+    (0x3F26, 1090),
+    (0x3F81, 1091),
+    (0x4086, 1092),
+    (0x40FF, 1093),
+    (0x413F, 1093),
+    (0x41E5, 1094),
+    (0x41F3, 1095),
+    (0x42A3, 1098),
+    (0x4347, 1099),
+    (0x4A10, 1286),
+];
 
-pub fn open_dat_auto(path: &str, force_version: Option<u32>) -> Result<DatFile, String> {
-    if let Some(v) = force_version {
-        let mut reader = DatReader::open(path, v)?;
-        return reader.read_dat().map_err(|e| format!("DAT parse error (version {}): {}", v, e));
+fn versions_for_signature(signature: u32) -> impl Iterator<Item = u32> + 'static {
+    SIGNATURE_VERSIONS
+        .iter()
+        .filter(move |(sig, _)| *sig == signature)
+        .map(|(_, version)| *version)
+}
+
+/// Fallback configs when signature lookup fails (newest parser behavior first).
+const FALLBACK_VERSIONS: &[u32] = &[1286, 1098, 1057, 1050, 1010, 960, 900, 854, 780, 772, 760, 750, 740, 710];
+
+fn push_config(configs: &mut Vec<DatParserConfig>, config: DatParserConfig) {
+    if !configs.contains(&config) {
+        configs.push(config);
     }
+}
 
-    let mut last_err = String::new();
-    for &v in CANDIDATE_VERSIONS {
-        let mut reader = DatReader::open(path, v)?;
-        match reader.read_dat() {
-            Ok(dat) => return Ok(dat),
-            Err(e) => last_err = format!("v{}: {}", v, e),
+/// Build parser candidates: signature match + `.otfi` hints + extended-sprite retries.
+fn parser_configs_for(path: &str, signature: u32) -> Vec<DatParserConfig> {
+    let otfi = find_otfi(path);
+    let mut configs = Vec::new();
+
+    for version in versions_for_signature(signature) {
+        push_config(&mut configs, config_for_version(version, otfi.as_ref(), false));
+        push_config(&mut configs, config_for_version(version, otfi.as_ref(), true));
+        // Custom clients often keep an old dat signature but use u32 sprite ids.
+        let (def_ext, def_fd, def_fg) = version_defaults(version);
+        if !def_ext {
+            push_config(
+                &mut configs,
+                DatParserConfig {
+                    version,
+                    extended: true,
+                    frame_durations: otfi.and_then(|o| o.frame_durations).unwrap_or(def_fd),
+                    frame_groups: otfi.and_then(|o| o.frame_groups).unwrap_or(def_fg),
+                    vli_attrs: false,
+                },
+            );
+            push_config(
+                &mut configs,
+                DatParserConfig {
+                    version,
+                    extended: true,
+                    frame_durations: otfi.and_then(|o| o.frame_durations).unwrap_or(def_fd),
+                    frame_groups: otfi.and_then(|o| o.frame_groups).unwrap_or(def_fg),
+                    vli_attrs: true,
+                },
+            );
         }
     }
+
+    for &version in FALLBACK_VERSIONS {
+        push_config(&mut configs, config_for_version(version, otfi.as_ref(), false));
+        let (def_ext, _, _) = version_defaults(version);
+        if !def_ext {
+            push_config(
+                &mut configs,
+                DatParserConfig {
+                    version,
+                    extended: true,
+                    ..config_for_version(version, otfi.as_ref(), false)
+                },
+            );
+        }
+    }
+
+    // Last resort: Tibia 11+ varint attribute ids (sprites stay u32 when extended).
+    push_config(&mut configs, config_for_version(1286, otfi.as_ref(), true));
+
+    configs
+}
+
+fn otfi_path_for_dat(dat_path: &str) -> Option<std::path::PathBuf> {
+    let path = std::path::Path::new(dat_path);
+    let stem = path.file_stem()?.to_str()?;
+    let dir = path.parent().unwrap_or_else(|| std::path::Path::new("."));
+    Some(dir.join(format!("{stem}.otfi")))
+}
+
+/// Read Object Builder `.otfi` metadata beside a `.dat` file, if present.
+pub fn find_otfi(dat_path: &str) -> Option<OtfiSettings> {
+    let otfi_path = otfi_path_for_dat(dat_path)?;
+    parse_otfi(&otfi_path).ok()
+}
+
+fn parse_otfi(path: &std::path::Path) -> Result<OtfiSettings, String> {
+    let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    let mut settings = OtfiSettings::default();
+    for line in text.lines() {
+        let line = line.trim();
+        let Some((key, value)) = line.split_once(':') else {
+            continue;
+        };
+        let key = key.trim().to_ascii_lowercase();
+        let value = value.trim();
+        let Some(parsed) = parse_bool(value) else {
+            continue;
+        };
+        match key.as_str() {
+            "extended" => settings.extended = Some(parsed),
+            "transparency" => settings.transparency = Some(parsed),
+            "frame-durations" => settings.frame_durations = Some(parsed),
+            "frame-groups" => settings.frame_groups = Some(parsed),
+            _ => {}
+        }
+    }
+    Ok(settings)
+}
+
+fn parse_bool(value: &str) -> Option<bool> {
+    match value.to_ascii_lowercase().as_str() {
+        "true" | "yes" | "1" => Some(true),
+        "false" | "no" | "0" => Some(false),
+        _ => None,
+    }
+}
+
+fn read_dat_signature(path: &str) -> Result<u32, String> {
+    let mut file = File::open(path).map_err(|e| format!("Failed to open DAT file: {}", e))?;
+    let mut buf = [0u8; 4];
+    file.read_exact(&mut buf).map_err(|e| e.to_string())?;
+    Ok(u32::from_le_bytes(buf))
+}
+
+fn try_parse_dat(path: &str, config: DatParserConfig) -> Result<DatFile, String> {
+    let mut reader = DatReader::open(path, config)?;
+    reader.read_dat()
+}
+
+pub fn open_dat_auto(path: &str, force_version: Option<u32>) -> Result<DatFile, String> {
+    let otfi = find_otfi(path);
+    if let Some(v) = force_version {
+        let config = config_for_version(v, otfi.as_ref(), false);
+        if let Ok(dat) = try_parse_dat(path, config) {
+            return Ok(dat);
+        }
+        return try_parse_dat(path, config_for_version(v, otfi.as_ref(), true))
+            .map_err(|e| format!("DAT parse error (version {}): {}", v, e));
+    }
+
+    let signature = read_dat_signature(path)?;
+    let mut last_err = String::new();
+
+    for config in parser_configs_for(path, signature) {
+        match try_parse_dat(path, config) {
+            Ok(dat) => return Ok(dat),
+            Err(e) => {
+                last_err = format!(
+                    "v{}{}{}{}{}: {}",
+                    config.version,
+                    if config.extended { " ext" } else { "" },
+                    if config.frame_durations { " fd" } else { "" },
+                    if config.frame_groups { " fg" } else { "" },
+                    if config.vli_attrs { " varint" } else { "" },
+                    e
+                );
+            }
+        }
+    }
+
     Err(format!(
-        "Could not auto-detect .dat version; no known layout parses cleanly. Last error: {}",
-        last_err
+        "Could not auto-detect .dat version (signature 0x{:X}); no known layout parses cleanly. Last error: {}",
+        signature, last_err
     ))
 }
 

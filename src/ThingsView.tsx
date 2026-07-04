@@ -26,6 +26,8 @@ interface Props {
 	category: ThingCategory;
 	selectedId: number | null;
 	onSelect: (id: number) => void;
+	transparent: boolean;
+	onTransparentChange: (transparent: boolean) => void;
 	showToast: (kind: Toast['kind'], msg: string) => void;
 }
 
@@ -130,11 +132,19 @@ function parseIdSearch(query: string): ((id: number) => boolean) | null {
 	return id => ranges.some(([a, b]) => id >= a && id <= b);
 }
 
-export default function ThingsView({ spr, dat, category, selectedId, onSelect, showToast }: Props) {
+export default function ThingsView({
+	spr,
+	dat,
+	category,
+	selectedId,
+	onSelect,
+	transparent,
+	onTransparentChange,
+	showToast
+}: Props) {
 	const [things, setThings] = useState<ThingSummary[] | null>(null);
 	const [loadError, setLoadError] = useState<string | null>(null);
 	const [search, setSearch] = useState('');
-	const [transparent, setTransparent] = useState(false);
 	const [zoomIdx, setZoomIdx] = useState(1);
 	const [detail, setDetail] = useState<ThingDetail | null>(null);
 	const [menu, setMenu] = useState<MenuState | null>(null);
@@ -314,7 +324,7 @@ export default function ThingsView({ spr, dat, category, selectedId, onSelect, s
 				</div>
 
 				<label className="ss-toggle">
-					<input type="checkbox" checked={transparent} onChange={e => setTransparent(e.target.checked)} />
+					<input type="checkbox" checked={transparent} onChange={e => onTransparentChange(e.target.checked)} />
 					Transparency
 				</label>
 

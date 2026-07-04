@@ -137,6 +137,8 @@ fn export_sprites(
 struct FilePair {
     spr: Option<String>,
     dat: Option<String>,
+    /// From sibling `.otfi` when present; controls 3- vs 4-channel sprite decompression.
+    transparency: Option<bool>,
 }
 
 /// Given a picked .spr or .dat path, finds the matching sibling file:
@@ -186,9 +188,21 @@ fn probe_pair(path: String) -> Result<FilePair, String> {
             .map(|p| p.to_string_lossy().into_owned())
     };
 
+    let dat_path = if ext == "dat" {
+        Some(path.clone())
+    } else {
+        find(&dats)
+    };
+
+    let transparency = dat_path
+        .as_deref()
+        .and_then(dat::find_otfi)
+        .and_then(|o| o.transparency);
+
     Ok(FilePair {
         spr: if ext == "spr" { Some(path.clone()) } else { find(&sprs) },
-        dat: if ext == "dat" { Some(path.clone()) } else { find(&dats) },
+        dat: dat_path,
+        transparency,
     })
 }
 
