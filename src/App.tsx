@@ -54,7 +54,6 @@ function fileName(path: string): string {
 export default function App() {
 	const [files, setFiles] = useState<FileSet | null>(null);
 	const [tab, setTab] = useState<Tab>('item');
-	// Remembered selection per category, so switching tabs keeps each one's pick
 	const [thingSel, setThingSel] = useState<Partial<Record<ThingCategory, number>>>({});
 	const [error, setError] = useState<string | null>(null);
 	const [opening, setOpening] = useState(false);
@@ -133,7 +132,6 @@ export default function App() {
 		setError(null);
 	}, [files]);
 
-	// Drag & drop a .spr/.dat file anywhere in the window
 	useEffect(() => {
 		const un = getCurrentWebview().onDragDropEvent(event => {
 			const payload = event.payload;
@@ -152,7 +150,6 @@ export default function App() {
 		};
 	}, [openFile]);
 
-	// Ctrl+O opens the picker
 	useEffect(() => {
 		const handler = (e: KeyboardEvent) => {
 			if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'o') {
@@ -166,123 +163,133 @@ export default function App() {
 
 	const win = getCurrentWindow();
 
-	const tabs: { key: Tab; label: string; icon: JSX.Element; count: number | null; disabled: boolean }[] = files
-		? [
-				{
-					key: 'item',
-					label: 'Items',
-					icon: <Package size={14} />,
-					count: files.dat ? files.dat.itemLastId - files.dat.itemFirstId + 1 : null,
-					disabled: !files.dat
-				},
-				{
-					key: 'outfit',
-					label: 'Outfits',
-					icon: <PersonStanding size={14} />,
-					count: files.dat?.outfitCount ?? null,
-					disabled: !files.dat
-				},
-				{
-					key: 'effect',
-					label: 'Effects',
-					icon: <Sparkles size={14} />,
-					count: files.dat?.effectCount ?? null,
-					disabled: !files.dat
-				},
-				{
-					key: 'missile',
-					label: 'Missiles',
-					icon: <Wand2 size={14} />,
-					count: files.dat?.missileCount ?? null,
-					disabled: !files.dat
-				},
-				{
-					key: 'sprites',
-					label: 'Sprites',
-					icon: <Grid3X3 size={14} />,
-					count: files.spr.spriteCount,
-					disabled: false
-				}
-			]
-		: [];
+	const navItems: { key: Tab; label: string; icon: JSX.Element; count: number | null; disabled: boolean }[] =
+		files
+			? [
+					{
+						key: 'item',
+						label: 'Items',
+						icon: <Package size={16} />,
+						count: files.dat ? files.dat.itemLastId - files.dat.itemFirstId + 1 : null,
+						disabled: !files.dat
+					},
+					{
+						key: 'outfit',
+						label: 'Outfits',
+						icon: <PersonStanding size={16} />,
+						count: files.dat?.outfitCount ?? null,
+						disabled: !files.dat
+					},
+					{
+						key: 'effect',
+						label: 'Effects',
+						icon: <Sparkles size={16} />,
+						count: files.dat?.effectCount ?? null,
+						disabled: !files.dat
+					},
+					{
+						key: 'missile',
+						label: 'Missiles',
+						icon: <Wand2 size={16} />,
+						count: files.dat?.missileCount ?? null,
+						disabled: !files.dat
+					},
+					{
+						key: 'sprites',
+						label: 'Sprites',
+						icon: <Grid3X3 size={16} />,
+						count: files.spr.spriteCount,
+						disabled: false
+					}
+				]
+			: [];
+
+	const openName = files
+		? fileName(files.dat ? files.dat.path : files.spr.path).replace(/\.(dat|spr)$/i, '')
+		: '';
 
 	return (
 		<div className="ss-app">
 			<div className="ss-titlebar" data-tauri-drag-region>
 				<div className="ss-titlebar-title">
-					<img src="/icon.png" alt="" className="ss-titlebar-icon" width={16} height={16} />
+					<img src="/icon.png" alt="" className="ss-titlebar-icon" width={14} height={14} />
 					<span>SPRx</span>
-					{files && (
-						<span className="ss-titlebar-file">
-							— {fileName(files.dat ? files.dat.path : files.spr.path).replace(/\.(dat|spr)$/i, '')}
-						</span>
-					)}
+					{files && <span className="ss-titlebar-file">— {openName}</span>}
 				</div>
 				<div className="ss-titlebar-spacer" data-tauri-drag-region />
 				<button className="ss-caption-button" onClick={() => void win.minimize()} aria-label="Minimize">
 					<Minus size={14} />
 				</button>
 				<button className="ss-caption-button" onClick={() => void win.toggleMaximize()} aria-label="Maximize">
-					<Square size={12} />
+					<Square size={11} />
 				</button>
 				<button className="ss-caption-button ss-caption-close" onClick={() => void win.close()} aria-label="Close">
-					<X size={16} />
+					<X size={14} />
 				</button>
 			</div>
 
 			{files ? (
-				<>
-					<div className="ss-tabbar">
-						{tabs.map(t => (
-							<button
-								key={t.key}
-								className={`ss-tab ${tab === t.key ? 'ss-tab-active' : ''}`}
-								disabled={t.disabled}
-								onClick={() => setTab(t.key)}
-							>
-								{t.icon}
-								{t.label}
-								{t.count !== null && <span className="ss-tab-count">{t.count.toLocaleString()}</span>}
-							</button>
-						))}
-						<div className="ss-tabbar-right">
+				<div className="ss-body">
+					<aside className="ss-sidebar">
+						<div className="ss-sidebar-file" title={files.dat?.path ?? files.spr.path}>
+							{openName}
+						</div>
+						<nav className="ss-sidebar-nav">
+							{navItems.map(t => (
+								<button
+									key={t.key}
+									className={`ss-nav-item ${tab === t.key ? 'ss-nav-item-active' : ''}`}
+									disabled={t.disabled}
+									onClick={() => setTab(t.key)}
+								>
+									{t.icon}
+									<span className="ss-nav-label">{t.label}</span>
+									{t.count !== null && (
+										<span className="ss-nav-meta">{t.count.toLocaleString()}</span>
+									)}
+								</button>
+							))}
+						</nav>
+						<div className="ss-sidebar-footer">
 							<button className="ss-icon-btn" onClick={() => void pickFile()}>
 								<FolderOpen size={14} />
 								Open other
 							</button>
 							<button className="ss-icon-btn" onClick={() => void closeFile()}>
 								<X size={14} />
-								Close
+								Close file
 							</button>
 						</div>
-					</div>
+					</aside>
 
-					{tab === 'sprites' ? (
-						<Viewer
-							key={files.spr.path}
-							file={files.spr}
-							transparent={files.transparent}
-							onTransparentChange={transparent =>
-								setFiles(f => (f ? { ...f, transparent } : f))
-							}
-							showToast={showToast}
-						/>
-					) : files.dat ? (
-						<ThingsView
-							key={`${files.dat.path}-${tab}`}
-							spr={files.spr}
-							dat={files.dat}
-							category={tab}
-							selectedId={thingSel[tab] ?? null}
-							onSelect={id => setThingSel(s => ({ ...s, [tab]: id }))}
-							transparent={files.transparent}
-							onTransparentChange={transparent =>
-								setFiles(f => (f ? { ...f, transparent } : f))
-							}
-							showToast={showToast}
-						/>
-					) : null}
-				</>
+					<main className="ss-main">
+						{tab === 'sprites' ? (
+							<Viewer
+								key={files.spr.path}
+								file={files.spr}
+								transparent={files.transparent}
+								onTransparentChange={transparent =>
+									setFiles(f => (f ? { ...f, transparent } : f))
+								}
+								showToast={showToast}
+							/>
+						) : files.dat ? (
+							<ThingsView
+								key={`${files.dat.path}-${tab}`}
+								spr={files.spr}
+								dat={files.dat}
+								category={tab}
+								selectedId={thingSel[tab] ?? null}
+								onSelect={id => setThingSel(s => ({ ...s, [tab]: id }))}
+								transparent={files.transparent}
+								onTransparentChange={transparent =>
+									setFiles(f => (f ? { ...f, transparent } : f))
+								}
+								showToast={showToast}
+							/>
+						) : null}
+					</main>
+				</div>
 			) : (
 				<Landing
 					recent={recent}

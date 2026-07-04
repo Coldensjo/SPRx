@@ -20,6 +20,14 @@ const GRID_PAD = 8;
 const ANIM_INTERVAL_MS = 220;
 const DIRECTIONS = ['North', 'East', 'South', 'West'];
 
+function thingAnimates(frames: number, animateEnabled: boolean): boolean {
+	return frames > 1 && animateEnabled;
+}
+
+function defaultAnimateEnabled(category: ThingCategory): boolean {
+	return category !== 'item';
+}
+
 interface Props {
 	spr: OpenFile;
 	dat: OpenDat;
@@ -54,10 +62,75 @@ interface RowProps {
 	cellW: number;
 	cellH: number;
 	transparent: boolean;
+	gridFrame: number;
+	animateEnabled: boolean;
 	selectedId: number | null;
 	onSelect: (id: number) => void;
 	onContextMenu: (e: React.MouseEvent, id: number) => void;
 }
+
+const AnimatedThingCell = memo(function AnimatedThingCell({
+	spr,
+	dat,
+	category,
+	thing,
+	zoom,
+	transparent,
+	frame
+}: {
+	spr: OpenFile;
+	dat: OpenDat;
+	category: ThingCategory;
+	thing: ThingSummary;
+	zoom: number;
+	transparent: boolean;
+	frame: number;
+}) {
+	const shown = frame % thing.frames;
+	return (
+		<div className="ss-cell-sprite ss-cell-sprite-anim" style={{ width: zoom, height: zoom }}>
+			{Array.from({ length: thing.frames }, (_, f) => (
+				<img
+					key={f}
+					src={thingUrl(spr, dat, category, thing.id, transparent, f)}
+					style={{ display: f === shown ? 'block' : 'none' }}
+					width={zoom}
+					height={zoom}
+					draggable={false}
+					alt=""
+				/>
+			))}
+		</div>
+	);
+});
+
+const StaticThingCell = memo(function StaticThingCell({
+	spr,
+	dat,
+	category,
+	thing,
+	zoom,
+	transparent
+}: {
+	spr: OpenFile;
+	dat: OpenDat;
+	category: ThingCategory;
+	thing: ThingSummary;
+	zoom: number;
+	transparent: boolean;
+}) {
+	return (
+		<div className="ss-cell-sprite" style={{ width: zoom, height: zoom }}>
+			<img
+				src={thingUrl(spr, dat, category, thing.id, transparent, 0)}
+				width={zoom}
+				height={zoom}
+				draggable={false}
+				alt=""
+			/>
+		</div>
+	);
+});
 
 // One atlas image per grid row: each thing occupies a zoom×zoom square.
 const ThingRow = memo(function ThingRow({
@@ -70,18 +143,23 @@ const ThingRow = memo(function ThingRow({
 	cellW,
 	cellH,
 	transparent,
+	gridFrame,
+	animateEnabled,
 	selectedId,
 	onSelect,
 	onContextMenu
 }: RowProps) {
-	const url = thingsRowUrl(
-		spr,
-		dat,
-		category,
-		things.map(t => t.id),
-		zoom,
-		transparent
-	);
+	const rowAnimates = animateEnabled && things.some(t => t.frames > 1);
+	const atlasUrl = rowAnimates
+		? null
+		: thingsRowUrl(
+				spr,
+				dat,
+				category,
+				things.map(t => t.id),
+				zoom,
+				transparent
+			);
 	return (
 		<div className="ss-grid-row" style={{ top, paddingLeft: GRID_PAD }}>
 			{things.map((t, i) => (
@@ -93,17 +171,38 @@ const ThingRow = memo(function ThingRow({
 					onMouseDown={e => e.button === 0 && onSelect(t.id)}
 					onContextMenu={e => onContextMenu(e, t.id)}
 				>
-					<div
-						className="ss-cell-sprite"
-						style={{
-							width: zoom,
-							height: zoom,
-							backgroundImage: `url("${url}")`,
-							backgroundSize: `${things.length * zoom}px ${zoom}px`,
-							backgroundPosition: `-${i * zoom}px 0`,
-							backgroundRepeat: 'no-repeat'
-						}}
-					/>
+					{rowAnimates && thingAnimates(t.frames, animateEnabled) ? (
+						<AnimatedThingCell
+							spr={spr}
+							dat={dat}
+							category={category}
+							thing={t}
+							zoom={zoom}
+							transparent={transparent}
+							frame={gridFrame}
+						/>
+					) : atlasUrl ? (
+						<div
+							className="ss-cell-sprite"
+							style={{
+								width: zoom,
+								height: zoom,
+								backgroundImage: `url("${atlasUrl}")`,
+								backgroundSize: `${things.length * zoom}px ${zoom}px`,
+								backgroundPosition: `-${i * zoom}px 0`,
+								backgroundRepeat: 'no-repeat'
+							}}
+						/>
+					) : (
+						<StaticThingCell
+							spr={spr}
+							dat={dat}
+							category={category}
+							thing={t}
+							zoom={zoom}
+							transparent={transparent}
+						/>
+					)}
 					<div className="ss-cell-id">{t.id}</div>
 				</div>
 			))}
@@ -151,6 +250,13 @@ export default function ThingsView({
 	const [playing, setPlaying] = useState(true);
 	const [frame, setFrame] = useState(0);
 	const [dir, setDir] = useState(2); // south
+	const [animateEnabled, setAnimateEnabled] = useState(() => defaultAnimateEnabled(category));
+	const [gridFrame, setGridFrame] = useState(0);
+
+	useEffect(() => {
+		setAnimateEnabled(defaultAnimateEnabled(category));
+		setPlaying(true);
+	}, [category]);
 
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const [scrollTop, setScrollTop] = useState(0);
@@ -213,12 +319,17 @@ export default function ThingsView({
 		};
 	}, [selectedId, dat.path, category]);
 
-	// Animation loop for the preview
+	// Animation loop for the details preview
 	useEffect(() => {
-		if (!detail || detail.frames <= 1 || !playing) return;
+		if (!detail || !thingAnimates(detail.frames, animateEnabled) || !playing) return;
 		const t = setInterval(() => setFrame(f => (f + 1) % detail.frames), ANIM_INTERVAL_MS);
 		return () => clearInterval(t);
-	}, [detail, playing]);
+	}, [detail, playing, animateEnabled]);
+
+	useEffect(() => {
+		if (!detail || thingAnimates(detail.frames, animateEnabled)) return;
+		setFrame(0);
+	}, [detail, animateEnabled]);
 
 	const shown = useMemo(() => {
 		if (!things) return [];
@@ -241,6 +352,20 @@ export default function ThingsView({
 		const slice = shown.slice(r * cols, (r + 1) * cols);
 		if (slice.length > 0) visible.push({ row: r, things: slice });
 	}
+
+	const gridAnimates = useMemo(
+		() => animateEnabled && shown.some(t => t.frames > 1),
+		[shown, animateEnabled]
+	);
+
+	useEffect(() => {
+		if (!gridAnimates) {
+			setGridFrame(0);
+			return;
+		}
+		const t = setInterval(() => setGridFrame(f => f + 1), ANIM_INTERVAL_MS);
+		return () => clearInterval(t);
+	}, [gridAnimates]);
 
 	const handleContextMenu = useCallback(
 		(e: React.MouseEvent, id: number) => {
@@ -302,7 +427,8 @@ export default function ThingsView({
 	}
 
 	const menuThing = menu ? things.find(t => t.id === menu.id) ?? null : null;
-	const isAnimated = detail !== null && detail.frames > 1;
+	const hasFrames = detail !== null && detail.frames > 1;
+	const isPlaying = hasFrames && thingAnimates(detail!.frames, animateEnabled) && playing;
 	const showDirs = detail !== null && detail.isOutfit && detail.patternX >= 2;
 
 	return (
@@ -326,6 +452,11 @@ export default function ThingsView({
 				<label className="ss-toggle">
 					<input type="checkbox" checked={transparent} onChange={e => onTransparentChange(e.target.checked)} />
 					Transparency
+				</label>
+
+				<label className="ss-toggle">
+					<input type="checkbox" checked={animateEnabled} onChange={e => setAnimateEnabled(e.target.checked)} />
+					Animate
 				</label>
 
 				<div className="ss-zoom">
@@ -365,6 +496,8 @@ export default function ThingsView({
 								cellW={cellW}
 								cellH={cellH}
 								transparent={transparent}
+								gridFrame={gridFrame}
+								animateEnabled={animateEnabled}
 								selectedId={selectedId}
 								onSelect={onSelect}
 								onContextMenu={handleContextMenu}
@@ -376,10 +509,11 @@ export default function ThingsView({
 				<div className="ss-details">
 					<div className="ss-details-header">
 						<span>{detail ? `${CATEGORY_LABEL[category]} ${detail.id}` : CATEGORY_LABEL[category]}</span>
-						{isAnimated && (
+						{hasFrames && (
 							<button
 								className="ss-search-clear"
 								onClick={() => setPlaying(p => !p)}
+								disabled={!animateEnabled}
 								aria-label={playing ? 'Pause animation' : 'Play animation'}
 							>
 								{playing ? <Pause size={14} /> : <Play size={14} />}
@@ -405,7 +539,7 @@ export default function ThingsView({
 									/>
 								))}
 							</div>
-							{isAnimated && (
+							{isPlaying && (
 								<div className="ss-details-anim">
 									frame {frame + 1}/{detail.frames}
 								</div>

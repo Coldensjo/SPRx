@@ -343,15 +343,15 @@ export default function Viewer({ file, transparent, onTransparentChange, showToa
 					)}
 				</div>
 
-				<div className="ss-pills">
+				<div className="ss-filter-tabs">
 					{categories.map(c => (
 						<button
 							key={c.key}
-							className={`ss-pill ${category === c.key ? 'ss-pill-active' : ''}`}
+							className={`ss-filter-tab ${category === c.key ? 'ss-filter-tab-active' : ''}`}
 							onClick={() => setCategory(c.key)}
 						>
 							{c.label}
-							<span className="ss-pill-count">{c.count.toLocaleString()}</span>
+							<span className="ss-filter-tab-meta">{c.count.toLocaleString()}</span>
 						</button>
 					))}
 				</div>

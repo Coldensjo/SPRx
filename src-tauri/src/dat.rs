@@ -1263,7 +1263,10 @@ pub fn compose_things_row(
     spr: &mut SprManager,
     spr_path: &str,
     things: &[&Thing],
+    cat: Category,
     cell: u32,
+    global_frame: u32,
+    animate_enabled: bool,
     transparent: bool,
 ) -> Result<ThingRender, String> {
     use rayon::prelude::*;
@@ -1271,7 +1274,8 @@ pub fn compose_things_row(
     let cell = cell as usize;
     let mut all_ids = Vec::new();
     for t in things {
-        let (frame, px, py, pz) = preview_pattern(t);
+        let frame = preview_frame(t, global_frame, animate_enabled);
+        let (_, px, py, pz) = preview_pattern(t);
         cell_sprite_ids(t, frame, px, py, pz, None, &mut all_ids);
     }
     let decoded = read_decoded(spr, spr_path, &all_ids, transparent)?;
@@ -1279,7 +1283,8 @@ pub fn compose_things_row(
     let renders: Vec<ThingRender> = things
         .par_iter()
         .map(|t| {
-            let (frame, px, py, pz) = preview_pattern(t);
+            let frame = preview_frame(t, global_frame, animate_enabled);
+            let (_, px, py, pz) = preview_pattern(t);
             compose_from_decoded(&decoded, t, frame, px, py, pz, None)
         })
         .collect();
@@ -1295,6 +1300,24 @@ pub fn compose_things_row(
         height_px: cell as u32,
         rgba: row,
     })
+}
+
+/// Whether this thing should cycle animation frames in previews.
+pub fn thing_animates(t: &Thing, animate_enabled: bool) -> bool {
+    t.frames > 1 && animate_enabled
+}
+
+pub fn thing_animate_always(t: &Thing) -> bool {
+    t.props.iter().any(|p| p.name == "animateAlways")
+}
+
+/// Frame index for a preview cell given a global animation tick.
+pub fn preview_frame(t: &Thing, global_frame: u32, animate_enabled: bool) -> u32 {
+    if thing_animates(t, animate_enabled) {
+        global_frame % t.frames.max(1) as u32
+    } else {
+        0
+    }
 }
 
 /// Default preview cell: first frame, pattern (0,0,0) — except outfits, which

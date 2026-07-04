@@ -46,6 +46,7 @@ struct ThingSummary {
     pattern_y: u8,
     pattern_z: u8,
     frames: u8,
+    animate_always: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     name: Option<String>,
 }
@@ -67,6 +68,7 @@ fn get_things(state: State<DatManagerState>, path: String, category: String) -> 
             pattern_y: t.pattern_y,
             pattern_z: t.pattern_z,
             frames: t.frames,
+            animate_always: dat::thing_animate_always(t),
             name: t.name.clone(),
         })
         .collect())

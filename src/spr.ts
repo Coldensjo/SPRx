@@ -55,6 +55,7 @@ export interface ThingSummary {
 	patternY: number;
 	patternZ: number;
 	frames: number;
+	animateAlways: boolean;
 	name?: string;
 }
 
@@ -139,7 +140,9 @@ export function thingsRowUrl(
 	category: ThingCategory,
 	ids: number[],
 	cell: number,
-	transparent: boolean
+	transparent: boolean,
+	frame = 0,
+	animate = false
 ): string {
 	const q = new URLSearchParams({
 		path: spr.path,
@@ -148,6 +151,8 @@ export function thingsRowUrl(
 		ids: ids.join(','),
 		cell: String(cell),
 		transparent: transparent ? '1' : '0',
+		frame: String(frame),
+		anim: animate ? '1' : '0',
 		v: String(dat.cacheKey)
 	});
 	return `${protocolBase}/things.png?${q.toString()}`;

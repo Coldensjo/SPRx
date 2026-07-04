@@ -6,6 +6,7 @@
 //   /thing.png?path=<spr>&dat=<dat>&cat=item|outfit|effect|missile&id=<n>&transparent=0|1
 //              [&frame=<n>][&dir=<n>]  (dir = pattern_x index, e.g. outfit facing)
 //   /things.png?path=<spr>&dat=<dat>&cat=<cat>&ids=1,2,3&cell=<px>&transparent=0|1
+//              [&frame=<n>][&anim=0|1]
 //              -> horizontal strip, one cell×cell square per id (grid row atlas)
 
 use std::borrow::Cow;
@@ -139,6 +140,8 @@ fn dispatch(
                 .ok_or_else(|| "invalid `cat` query param".to_string())?;
             let transparent = num::<u32>(query, "transparent", 0) != 0;
             let cell = num::<u32>(query, "cell", 64).clamp(16, 256);
+            let global_frame = num::<u32>(query, "frame", 0);
+            let animate_enabled = num::<u32>(query, "anim", num::<u32>(query, "animItems", 0)) != 0;
 
             let ids: Vec<u32> = query
                 .get("ids")
@@ -159,7 +162,16 @@ fn dispatch(
                 .collect::<Result<_, _>>()?;
 
             let mut spr_manager = spr.lock().map_err(|e| format!("lock: {e}"))?;
-            let render = dat::compose_things_row(&mut spr_manager, &spr_path, &things, cell, transparent)?;
+            let render = dat::compose_things_row(
+                &mut spr_manager,
+                &spr_path,
+                &things,
+                cat,
+                cell,
+                global_frame,
+                animate_enabled,
+                transparent,
+            )?;
             let png = dat::encode_png(&render)?;
             Ok(("image/png", png))
         }
