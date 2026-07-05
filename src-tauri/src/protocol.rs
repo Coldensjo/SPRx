@@ -168,7 +168,6 @@ fn dispatch(
                 &mut spr_manager,
                 &spr_path,
                 &things,
-                cat,
                 cell,
                 global_frame,
                 animate_enabled,

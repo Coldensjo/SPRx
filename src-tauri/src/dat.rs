@@ -5,8 +5,7 @@
 
 use serde::Serialize;
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::{self, BufReader, Read, Seek};
+use std::io;
 use std::sync::{Arc, Mutex};
 
 use crate::spr::{decompress_to_rgba, SprManager, SPRITE_SIZE};
@@ -442,14 +441,17 @@ struct DatParserConfig {
     vli_attrs: bool,
 }
 
-struct DatReader {
-    reader: BufReader<File>,
+/// Parses a .dat already read into memory: auto-detection retries several
+/// parser configs, so paying the file read once and scanning a slice keeps
+/// each attempt cheap (no per-field BufReader syscall machinery).
+struct DatReader<'a> {
+    data: &'a [u8],
+    pos: usize,
     version: u32,
     extended: bool,
     frame_durations: bool,
     frame_groups: bool,
     vli_attrs: bool,
-    file_len: u64,
 }
 
 fn version_defaults(version: u32) -> (bool, bool, bool) {
@@ -471,44 +473,45 @@ fn config_for_version(version: u32, otfi: Option<&OtfiSettings>, vli_attrs: bool
     }
 }
 
-impl DatReader {
-    fn open(path: &str, config: DatParserConfig) -> Result<Self, String> {
-        let file = File::open(path).map_err(|e| format!("Failed to open DAT file: {}", e))?;
-        let file_len = file.metadata().map_err(|e| e.to_string())?.len();
-        Ok(Self {
-            reader: BufReader::new(file),
+impl<'a> DatReader<'a> {
+    fn new(data: &'a [u8], config: DatParserConfig) -> Self {
+        Self {
+            data,
+            pos: 0,
             version: config.version,
             extended: config.extended,
             frame_durations: config.frame_durations,
             frame_groups: config.frame_groups,
             vli_attrs: config.vli_attrs,
-            file_len,
-        })
+        }
+    }
+
+    fn take(&mut self, n: usize) -> io::Result<&'a [u8]> {
+        let end = self
+            .pos
+            .checked_add(n)
+            .filter(|&end| end <= self.data.len())
+            .ok_or_else(|| io::Error::new(io::ErrorKind::UnexpectedEof, "unexpected end of file"))?;
+        let bytes = &self.data[self.pos..end];
+        self.pos = end;
+        Ok(bytes)
     }
 
     fn read_u8(&mut self) -> io::Result<u8> {
-        let mut b = [0u8; 1];
-        self.reader.read_exact(&mut b)?;
-        Ok(b[0])
+        Ok(self.take(1)?[0])
     }
 
     fn read_u16(&mut self) -> io::Result<u16> {
-        let mut b = [0u8; 2];
-        self.reader.read_exact(&mut b)?;
-        Ok(u16::from_le_bytes(b))
+        Ok(u16::from_le_bytes(self.take(2)?.try_into().unwrap()))
     }
 
     fn read_u32(&mut self) -> io::Result<u32> {
-        let mut b = [0u8; 4];
-        self.reader.read_exact(&mut b)?;
-        Ok(u32::from_le_bytes(b))
+        Ok(u32::from_le_bytes(self.take(4)?.try_into().unwrap()))
     }
 
     fn read_string(&mut self) -> io::Result<String> {
-        let len = self.read_u16()?;
-        let mut buf = vec![0u8; len as usize];
-        self.reader.read_exact(&mut buf)?;
-        Ok(String::from_utf8_lossy(&buf).to_string())
+        let len = self.read_u16()? as usize;
+        Ok(String::from_utf8_lossy(self.take(len)?).into_owned())
     }
 
     /// Protobuf-style varint used by Tibia 11+ .dat attribute ids.
@@ -694,18 +697,21 @@ impl DatReader {
                 ));
             }
 
-            let mut sprite_index = Vec::with_capacity(total as usize);
-            for _ in 0..total {
-                let sid = if self.extended {
-                    self.read_u32()?
-                } else {
-                    self.read_u16()? as u32
-                };
-                sprite_index.push(sid);
-            }
+            let id_width = if self.extended { 4 } else { 2 };
+            let id_bytes = self.take(total as usize * id_width)?;
 
             // Keep the first group (idle) as the thing's primary layout.
             if group_idx == 0 {
+                let mut sprite_index = Vec::with_capacity(total as usize);
+                if self.extended {
+                    sprite_index.extend(
+                        id_bytes.chunks_exact(4).map(|b| u32::from_le_bytes(b.try_into().unwrap())),
+                    );
+                } else {
+                    sprite_index.extend(
+                        id_bytes.chunks_exact(2).map(|b| u16::from_le_bytes(b.try_into().unwrap()) as u32),
+                    );
+                }
                 thing.width = width;
                 thing.height = height;
                 thing.exact_size = exact_size;
@@ -783,11 +789,10 @@ impl DatReader {
         }
 
         // A correct configuration consumes the file exactly.
-        let pos = self.reader.stream_position().map_err(|e| e.to_string())?;
-        if pos != self.file_len {
+        if self.pos != self.data.len() {
             return Err(format!(
                 "Parsed OK but {} trailing bytes remain (wrong version guess)",
-                self.file_len - pos
+                self.data.len() - self.pos
             ));
         }
 
@@ -1033,34 +1038,31 @@ fn parse_bool(value: &str) -> Option<bool> {
     }
 }
 
-fn read_dat_signature(path: &str) -> Result<u32, String> {
-    let mut file = File::open(path).map_err(|e| format!("Failed to open DAT file: {}", e))?;
-    let mut buf = [0u8; 4];
-    file.read_exact(&mut buf).map_err(|e| e.to_string())?;
-    Ok(u32::from_le_bytes(buf))
-}
-
-fn try_parse_dat(path: &str, config: DatParserConfig) -> Result<DatFile, String> {
-    let mut reader = DatReader::open(path, config)?;
-    reader.read_dat()
+fn try_parse_dat(data: &[u8], config: DatParserConfig) -> Result<DatFile, String> {
+    DatReader::new(data, config).read_dat()
 }
 
 pub fn open_dat_auto(path: &str, force_version: Option<u32>) -> Result<DatFile, String> {
+    // Read the file once; every detection attempt parses the same buffer.
+    let data = std::fs::read(path).map_err(|e| format!("Failed to open DAT file: {}", e))?;
     let otfi = find_otfi(path);
     if let Some(v) = force_version {
         let config = config_for_version(v, otfi.as_ref(), false);
-        if let Ok(dat) = try_parse_dat(path, config) {
+        if let Ok(dat) = try_parse_dat(&data, config) {
             return Ok(dat);
         }
-        return try_parse_dat(path, config_for_version(v, otfi.as_ref(), true))
+        return try_parse_dat(&data, config_for_version(v, otfi.as_ref(), true))
             .map_err(|e| format!("DAT parse error (version {}): {}", v, e));
     }
 
-    let signature = read_dat_signature(path)?;
+    let signature = data
+        .get(0..4)
+        .map(|b| u32::from_le_bytes(b.try_into().unwrap()))
+        .ok_or_else(|| "File too small to be a .dat file".to_string())?;
     let mut last_err = String::new();
 
     for config in parser_configs_for(path, signature) {
-        match try_parse_dat(path, config) {
+        match try_parse_dat(&data, config) {
             Ok(dat) => return Ok(dat),
             Err(e) => {
                 last_err = format!(
@@ -1263,7 +1265,6 @@ pub fn compose_things_row(
     spr: &mut SprManager,
     spr_path: &str,
     things: &[&Thing],
-    cat: Category,
     cell: u32,
     global_frame: u32,
     animate_enabled: bool,
@@ -1346,6 +1347,12 @@ pub fn compose_thing_sheet(
         return Err("Spritesheet would be too large".to_string());
     }
 
+    // The sheet covers every frame/pattern/layer combination, i.e. the whole
+    // sprite index — read and decode it in one pass instead of once per cell
+    // (cells share many sprites, and each read hits the file).
+    let ids: Vec<u32> = t.sprite_index.iter().copied().filter(|&sid| sid != 0).collect();
+    let decoded = read_decoded(spr, spr_path, &ids, transparent)?;
+
     let mut sheet = vec![0u8; sheet_w * sheet_h * 4];
 
     for pz in 0..t.pattern_z as u32 {
@@ -1353,7 +1360,7 @@ pub fn compose_thing_sheet(
             for px in 0..t.pattern_x as u32 {
                 for l in 0..t.layers as u32 {
                     for frame in 0..t.frames as u32 {
-                        let cell = compose_thing_cell(spr, spr_path, t, frame, px, py, pz, Some(l), transparent)?;
+                        let cell = compose_from_decoded(&decoded, t, frame, px, py, pz, Some(l));
                         let ox = (px as usize + l as usize * t.pattern_x as usize) * cell_w;
                         let oy = ((pz as usize * t.pattern_y as usize + py as usize) * t.frames as usize
                             + frame as usize)
