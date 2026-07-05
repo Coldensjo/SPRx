@@ -2,7 +2,8 @@ pub mod dat;
 mod protocol;
 pub mod spr;
 
-use std::sync::{Arc, Mutex};
+use std::path::PathBuf;
+use std::sync::{Arc, RwLock};
 
 use dat::{Category, DatInfo, DatManager, DatManagerState};
 use serde::Serialize;
@@ -10,27 +11,35 @@ use spr::{SprInfo, SprManager, SprManagerState};
 use tauri::State;
 
 #[tauri::command]
-fn open_spr(state: State<SprManagerState>, path: String, extended: Option<bool>) -> Result<SprInfo, String> {
-    let mut manager = state.lock().map_err(|e| format!("lock: {e}"))?;
+fn open_spr(
+    state: State<SprManagerState>,
+    path: String,
+    extended: Option<bool>,
+) -> Result<SprInfo, String> {
+    let mut manager = state.write().map_err(|e| format!("lock: {e}"))?;
     manager.open_file(path, extended)
 }
 
 #[tauri::command]
 fn close_spr(state: State<SprManagerState>, path: String) -> Result<(), String> {
-    let mut manager = state.lock().map_err(|e| format!("lock: {e}"))?;
+    let mut manager = state.write().map_err(|e| format!("lock: {e}"))?;
     manager.close_file(&path);
     Ok(())
 }
 
 #[tauri::command]
-fn open_dat(state: State<DatManagerState>, path: String, version: Option<u32>) -> Result<DatInfo, String> {
-    let mut manager = state.lock().map_err(|e| format!("lock: {e}"))?;
+fn open_dat(
+    state: State<DatManagerState>,
+    path: String,
+    version: Option<u32>,
+) -> Result<DatInfo, String> {
+    let mut manager = state.write().map_err(|e| format!("lock: {e}"))?;
     manager.open_file(path, version)
 }
 
 #[tauri::command]
 fn close_dat(state: State<DatManagerState>, path: String) -> Result<(), String> {
-    let mut manager = state.lock().map_err(|e| format!("lock: {e}"))?;
+    let mut manager = state.write().map_err(|e| format!("lock: {e}"))?;
     manager.close_file(&path);
     Ok(())
 }
@@ -55,10 +64,22 @@ struct ThingSummary {
     name: Option<String>,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExportThingsResult {
+    exported: usize,
+    failed: Vec<u32>,
+}
+
 #[tauri::command]
-fn get_things(state: State<DatManagerState>, path: String, category: String) -> Result<Vec<ThingSummary>, String> {
-    let cat = Category::parse(&category).ok_or_else(|| format!("invalid category: {}", category))?;
-    let manager = state.lock().map_err(|e| format!("lock: {e}"))?;
+fn get_things(
+    state: State<DatManagerState>,
+    path: String,
+    category: String,
+) -> Result<Vec<ThingSummary>, String> {
+    let cat =
+        Category::parse(&category).ok_or_else(|| format!("invalid category: {}", category))?;
+    let manager = state.read().map_err(|e| format!("lock: {e}"))?;
     let file = manager.file(&path)?;
     Ok(file
         .things(cat)
@@ -80,9 +101,15 @@ fn get_things(state: State<DatManagerState>, path: String, category: String) -> 
 }
 
 #[tauri::command]
-fn get_thing(state: State<DatManagerState>, path: String, category: String, id: u32) -> Result<dat::Thing, String> {
-    let cat = Category::parse(&category).ok_or_else(|| format!("invalid category: {}", category))?;
-    let manager = state.lock().map_err(|e| format!("lock: {e}"))?;
+fn get_thing(
+    state: State<DatManagerState>,
+    path: String,
+    category: String,
+    id: u32,
+) -> Result<dat::Thing, String> {
+    let cat =
+        Category::parse(&category).ok_or_else(|| format!("invalid category: {}", category))?;
+    let manager = state.read().map_err(|e| format!("lock: {e}"))?;
     let file = manager.file(&path)?;
     file.thing(cat, id)
         .cloned()
@@ -103,21 +130,108 @@ fn export_thing(
     transparent: bool,
     out_path: String,
 ) -> Result<(), String> {
-    let cat = Category::parse(&category).ok_or_else(|| format!("invalid category: {}", category))?;
-    let dat_manager = dat_state.lock().map_err(|e| format!("lock: {e}"))?;
+    let cat =
+        Category::parse(&category).ok_or_else(|| format!("invalid category: {}", category))?;
+    let dat_manager = dat_state.read().map_err(|e| format!("lock: {e}"))?;
     let file = dat_manager.file(&dat_path)?;
-    let thing = file.thing(cat, id).ok_or_else(|| format!("unknown {} id {}", category, id))?;
+    let thing = file
+        .thing(cat, id)
+        .ok_or_else(|| format!("unknown {} id {}", category, id))?;
 
-    let mut spr_manager = spr_state.lock().map_err(|e| format!("lock: {e}"))?;
+    let spr_manager = spr_state.read().map_err(|e| format!("lock: {e}"))?;
     let render = match mode.as_str() {
-        "sheet" => dat::compose_thing_sheet(&mut spr_manager, &spr_path, thing, transparent)?,
+        "sheet" => dat::compose_thing_sheet(&spr_manager, &spr_path, thing, transparent)?,
         _ => {
             let (frame, px, py, pz) = dat::preview_pattern(thing);
-            dat::compose_thing_cell(&mut spr_manager, &spr_path, thing, frame, px, py, pz, None, transparent)?
+            dat::compose_thing_cell(
+                &spr_manager,
+                &spr_path,
+                thing,
+                frame,
+                px,
+                py,
+                pz,
+                None,
+                transparent,
+            )?
         }
     };
     let png = dat::encode_png(&render)?;
     std::fs::write(&out_path, png).map_err(|e| format!("Failed to write {}: {}", out_path, e))
+}
+
+/// Exports several things as individual PNG files in one backend call.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+fn export_things(
+    spr_state: State<SprManagerState>,
+    dat_state: State<DatManagerState>,
+    spr_path: String,
+    dat_path: String,
+    category: String,
+    ids: Vec<u32>,
+    mode: String,
+    transparent: bool,
+    out_dir: String,
+) -> Result<ExportThingsResult, String> {
+    use rayon::prelude::*;
+
+    if ids.is_empty() {
+        return Err("Nothing to export".to_string());
+    }
+
+    let cat =
+        Category::parse(&category).ok_or_else(|| format!("invalid category: {}", category))?;
+    let out_dir = PathBuf::from(out_dir);
+    let suffix = if mode == "sheet" { "sheet" } else { "image" };
+
+    let dat_manager = dat_state.read().map_err(|e| format!("lock: {e}"))?;
+    let file = dat_manager.file(&dat_path)?;
+    let spr_manager = spr_state.read().map_err(|e| format!("lock: {e}"))?;
+
+    let results: Vec<(u32, Result<(), String>)> = ids
+        .par_iter()
+        .map(|&id| {
+            let result = (|| {
+                let thing = file
+                    .thing(cat, id)
+                    .ok_or_else(|| format!("unknown {} id {}", category, id))?;
+                let render = match mode.as_str() {
+                    "sheet" => {
+                        dat::compose_thing_sheet(&spr_manager, &spr_path, thing, transparent)?
+                    }
+                    _ => {
+                        let (frame, px, py, pz) = dat::preview_pattern(thing);
+                        dat::compose_thing_cell(
+                            &spr_manager,
+                            &spr_path,
+                            thing,
+                            frame,
+                            px,
+                            py,
+                            pz,
+                            None,
+                            transparent,
+                        )?
+                    }
+                };
+                let png = dat::encode_png(&render)?;
+                let out_path = out_dir.join(format!("{}_{}_{}.png", category, id, suffix));
+                std::fs::write(&out_path, png)
+                    .map_err(|e| format!("Failed to write {}: {}", out_path.display(), e))
+            })();
+            (id, result)
+        })
+        .collect();
+
+    let failed: Vec<u32> = results
+        .iter()
+        .filter_map(|(id, result)| result.as_ref().err().map(|_| *id))
+        .collect();
+    Ok(ExportThingsResult {
+        exported: results.len() - failed.len(),
+        failed,
+    })
 }
 
 /// Exports several things into one combined spritesheet PNG, arranging each
@@ -138,12 +252,16 @@ fn export_things_sheet(
     align: String,
     out_path: String,
 ) -> Result<(), String> {
-    let cat = Category::parse(&category).ok_or_else(|| format!("invalid category: {}", category))?;
-    let dat_manager = dat_state.lock().map_err(|e| format!("lock: {e}"))?;
+    let cat =
+        Category::parse(&category).ok_or_else(|| format!("invalid category: {}", category))?;
+    let dat_manager = dat_state.read().map_err(|e| format!("lock: {e}"))?;
     let file = dat_manager.file(&dat_path)?;
     let things: Vec<&dat::Thing> = ids
         .iter()
-        .map(|&id| file.thing(cat, id).ok_or_else(|| format!("unknown {} id {}", category, id)))
+        .map(|&id| {
+            file.thing(cat, id)
+                .ok_or_else(|| format!("unknown {} id {}", category, id))
+        })
         .collect::<Result<_, _>>()?;
 
     let layout = dat::SheetLayout {
@@ -151,8 +269,8 @@ fn export_things_sheet(
         spacing: spacing.min(256),
         align: dat::Align::parse(&align),
     };
-    let mut spr_manager = spr_state.lock().map_err(|e| format!("lock: {e}"))?;
-    let render = dat::compose_things_sheet(&mut spr_manager, &spr_path, &things, transparent, &layout)?;
+    let spr_manager = spr_state.read().map_err(|e| format!("lock: {e}"))?;
+    let render = dat::compose_things_sheet(&spr_manager, &spr_path, &things, transparent, &layout)?;
     let png = dat::encode_png(&render)?;
     std::fs::write(&out_path, png).map_err(|e| format!("Failed to write {}: {}", out_path, e))
 }
@@ -170,7 +288,7 @@ fn export_sprites(
         return Err("Nothing to export".to_string());
     }
     let png = {
-        let mut manager = state.lock().map_err(|e| format!("lock: {e}"))?;
+        let manager = state.read().map_err(|e| format!("lock: {e}"))?;
         manager.compose_atlas_png(&path, &ids, cols, transparent)?
     };
     std::fs::write(&out_path, png).map_err(|e| format!("Failed to write {}: {}", out_path, e))
@@ -191,7 +309,11 @@ struct FilePair {
 fn probe_pair(path: String) -> Result<FilePair, String> {
     let picked = std::path::Path::new(&path);
     let dir = picked.parent().ok_or("Invalid path")?;
-    let stem = picked.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
+    let stem = picked
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_lowercase();
     let ext = picked
         .extension()
         .and_then(|s| s.to_str())
@@ -203,7 +325,11 @@ fn probe_pair(path: String) -> Result<FilePair, String> {
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
             let p = entry.path();
-            match p.extension().and_then(|s| s.to_str()).map(|s| s.to_lowercase()) {
+            match p
+                .extension()
+                .and_then(|s| s.to_str())
+                .map(|s| s.to_lowercase())
+            {
                 Some(e) if e == "spr" => sprs.push(p),
                 Some(e) if e == "dat" => dats.push(p),
                 _ => {}
@@ -244,7 +370,11 @@ fn probe_pair(path: String) -> Result<FilePair, String> {
         .and_then(|o| o.transparency);
 
     Ok(FilePair {
-        spr: if ext == "spr" { Some(path.clone()) } else { find(&sprs) },
+        spr: if ext == "spr" {
+            Some(path.clone())
+        } else {
+            find(&sprs)
+        },
         dat: dat_path,
         transparency,
     })
@@ -252,8 +382,8 @@ fn probe_pair(path: String) -> Result<FilePair, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let spr_manager: SprManagerState = Arc::new(Mutex::new(SprManager::new()));
-    let dat_manager: DatManagerState = Arc::new(Mutex::new(DatManager::new()));
+    let spr_manager: SprManagerState = Arc::new(RwLock::new(SprManager::new()));
+    let dat_manager: DatManagerState = Arc::new(RwLock::new(DatManager::new()));
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -268,6 +398,7 @@ pub fn run() {
             get_things,
             get_thing,
             export_thing,
+            export_things,
             export_things_sheet,
             export_sprites,
             probe_pair

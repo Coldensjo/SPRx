@@ -83,7 +83,9 @@ fn dispatch(
             let transparent = num::<u32>(query, "transparent", 0) != 0;
 
             let ids: Vec<u32> = if let Some(list) = query.get("ids") {
-                list.split(',').filter_map(|v| v.trim().parse().ok()).collect()
+                list.split(',')
+                    .filter_map(|v| v.trim().parse().ok())
+                    .collect()
             } else {
                 let start = num::<u32>(query, "start", 1).max(1);
                 let count = num::<u32>(query, "count", 0);
@@ -97,12 +99,12 @@ fn dispatch(
                 return Err("too many sprite ids in one atlas request".to_string());
             }
 
-            let mut manager = spr.lock().map_err(|e| format!("lock: {e}"))?;
+            let manager = spr.read().map_err(|e| format!("lock: {e}"))?;
             let png = manager.compose_atlas_png(&spr_path, &ids, cols, transparent)?;
             Ok(("image/png", png))
         }
         "/flags.bin" => {
-            let mut manager = spr.lock().map_err(|e| format!("lock: {e}"))?;
+            let manager = spr.read().map_err(|e| format!("lock: {e}"))?;
             let flags = manager.read_flags(&spr_path)?;
             Ok(("application/octet-stream", flags))
         }
@@ -116,7 +118,7 @@ fn dispatch(
             let id = num::<u32>(query, "id", 0);
             let transparent = num::<u32>(query, "transparent", 0) != 0;
 
-            let dat_manager = dat.lock().map_err(|e| format!("lock: {e}"))?;
+            let dat_manager = dat.read().map_err(|e| format!("lock: {e}"))?;
             let file = dat_manager.file(&dat_path)?;
             let thing = file
                 .thing(cat, id)
@@ -127,9 +129,18 @@ fn dispatch(
             let px = num::<u32>(query, "dir", def_px) % thing.pattern_x.max(1) as u32;
             let py = num::<u32>(query, "diry", def_py) % thing.pattern_y.max(1) as u32;
 
-            let mut spr_manager = spr.lock().map_err(|e| format!("lock: {e}"))?;
-            let render =
-                dat::compose_thing_cell(&mut spr_manager, &spr_path, thing, frame, px, py, pz, None, transparent)?;
+            let spr_manager = spr.read().map_err(|e| format!("lock: {e}"))?;
+            let render = dat::compose_thing_cell(
+                &spr_manager,
+                &spr_path,
+                thing,
+                frame,
+                px,
+                py,
+                pz,
+                None,
+                transparent,
+            )?;
             let png = dat::encode_png(&render)?;
             Ok(("image/png", png))
         }
@@ -147,7 +158,11 @@ fn dispatch(
 
             let ids: Vec<u32> = query
                 .get("ids")
-                .map(|list| list.split(',').filter_map(|v| v.trim().parse().ok()).collect())
+                .map(|list| {
+                    list.split(',')
+                        .filter_map(|v| v.trim().parse().ok())
+                        .collect()
+                })
                 .unwrap_or_default();
             if ids.is_empty() {
                 return Err("no thing ids requested".to_string());
@@ -156,16 +171,19 @@ fn dispatch(
                 return Err("too many thing ids in one request".to_string());
             }
 
-            let dat_manager = dat.lock().map_err(|e| format!("lock: {e}"))?;
+            let dat_manager = dat.read().map_err(|e| format!("lock: {e}"))?;
             let file = dat_manager.file(&dat_path)?;
             let things: Vec<&dat::Thing> = ids
                 .iter()
-                .map(|&id| file.thing(cat, id).ok_or_else(|| format!("unknown thing id {}", id)))
+                .map(|&id| {
+                    file.thing(cat, id)
+                        .ok_or_else(|| format!("unknown thing id {}", id))
+                })
                 .collect::<Result<_, _>>()?;
 
-            let mut spr_manager = spr.lock().map_err(|e| format!("lock: {e}"))?;
+            let spr_manager = spr.read().map_err(|e| format!("lock: {e}"))?;
             let render = dat::compose_things_row(
-                &mut spr_manager,
+                &spr_manager,
                 &spr_path,
                 &things,
                 cell,

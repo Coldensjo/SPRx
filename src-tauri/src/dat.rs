@@ -6,7 +6,7 @@
 use serde::Serialize;
 use std::collections::HashMap;
 use std::io;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 
 use crate::spr::{decompress_to_rgba, SprManager, SPRITE_SIZE};
 
@@ -455,14 +455,14 @@ struct DatReader<'a> {
 }
 
 fn version_defaults(version: u32) -> (bool, bool, bool) {
-    (
-        version >= 960,
-        version >= 1050,
-        version >= 1057,
-    )
+    (version >= 960, version >= 1050, version >= 1057)
 }
 
-fn config_for_version(version: u32, otfi: Option<&OtfiSettings>, vli_attrs: bool) -> DatParserConfig {
+fn config_for_version(
+    version: u32,
+    otfi: Option<&OtfiSettings>,
+    vli_attrs: bool,
+) -> DatParserConfig {
     let (def_ext, def_fd, def_fg) = version_defaults(version);
     DatParserConfig {
         version,
@@ -491,7 +491,9 @@ impl<'a> DatReader<'a> {
             .pos
             .checked_add(n)
             .filter(|&end| end <= self.data.len())
-            .ok_or_else(|| io::Error::new(io::ErrorKind::UnexpectedEof, "unexpected end of file"))?;
+            .ok_or_else(|| {
+                io::Error::new(io::ErrorKind::UnexpectedEof, "unexpected end of file")
+            })?;
         let bytes = &self.data[self.pos..end];
         self.pos = end;
         Ok(bytes)
@@ -666,7 +668,11 @@ impl<'a> DatReader<'a> {
 
             let width = self.read_u8()?;
             let height = self.read_u8()?;
-            let exact_size = if width > 1 || height > 1 { self.read_u8()? } else { 32 };
+            let exact_size = if width > 1 || height > 1 {
+                self.read_u8()?
+            } else {
+                32
+            };
             let layers = self.read_u8()?;
             let pattern_x = self.read_u8()?;
             let pattern_y = self.read_u8()?;
@@ -705,11 +711,15 @@ impl<'a> DatReader<'a> {
                 let mut sprite_index = Vec::with_capacity(total as usize);
                 if self.extended {
                     sprite_index.extend(
-                        id_bytes.chunks_exact(4).map(|b| u32::from_le_bytes(b.try_into().unwrap())),
+                        id_bytes
+                            .chunks_exact(4)
+                            .map(|b| u32::from_le_bytes(b.try_into().unwrap())),
                     );
                 } else {
                     sprite_index.extend(
-                        id_bytes.chunks_exact(2).map(|b| u16::from_le_bytes(b.try_into().unwrap()) as u32),
+                        id_bytes
+                            .chunks_exact(2)
+                            .map(|b| u16::from_le_bytes(b.try_into().unwrap()) as u32),
                     );
                 }
                 thing.width = width;
@@ -749,11 +759,21 @@ impl<'a> DatReader<'a> {
     }
 
     fn read_dat(&mut self) -> Result<DatFile, String> {
-        let signature = self.read_u32().map_err(|e| format!("Failed to read signature: {}", e))?;
-        let items_last = self.read_u16().map_err(|e| format!("Failed to read items count: {}", e))?;
-        let outfits_count = self.read_u16().map_err(|e| format!("Failed to read outfits count: {}", e))?;
-        let effects_count = self.read_u16().map_err(|e| format!("Failed to read effects count: {}", e))?;
-        let missiles_count = self.read_u16().map_err(|e| format!("Failed to read missiles count: {}", e))?;
+        let signature = self
+            .read_u32()
+            .map_err(|e| format!("Failed to read signature: {}", e))?;
+        let items_last = self
+            .read_u16()
+            .map_err(|e| format!("Failed to read items count: {}", e))?;
+        let outfits_count = self
+            .read_u16()
+            .map_err(|e| format!("Failed to read outfits count: {}", e))?;
+        let effects_count = self
+            .read_u16()
+            .map_err(|e| format!("Failed to read effects count: {}", e))?;
+        let missiles_count = self
+            .read_u16()
+            .map_err(|e| format!("Failed to read missiles count: {}", e))?;
 
         if items_last < 100 {
             return Err("Invalid .dat header: item count below 100".to_string());
@@ -930,7 +950,9 @@ fn versions_for_signature(signature: u32) -> impl Iterator<Item = u32> + 'static
 }
 
 /// Fallback configs when signature lookup fails (newest parser behavior first).
-const FALLBACK_VERSIONS: &[u32] = &[1286, 1098, 1057, 1050, 1010, 960, 900, 854, 780, 772, 760, 750, 740, 710];
+const FALLBACK_VERSIONS: &[u32] = &[
+    1286, 1098, 1057, 1050, 1010, 960, 900, 854, 780, 772, 760, 750, 740, 710,
+];
 
 fn push_config(configs: &mut Vec<DatParserConfig>, config: DatParserConfig) {
     if !configs.contains(&config) {
@@ -944,8 +966,14 @@ fn parser_configs_for(path: &str, signature: u32) -> Vec<DatParserConfig> {
     let mut configs = Vec::new();
 
     for version in versions_for_signature(signature) {
-        push_config(&mut configs, config_for_version(version, otfi.as_ref(), false));
-        push_config(&mut configs, config_for_version(version, otfi.as_ref(), true));
+        push_config(
+            &mut configs,
+            config_for_version(version, otfi.as_ref(), false),
+        );
+        push_config(
+            &mut configs,
+            config_for_version(version, otfi.as_ref(), true),
+        );
         // Custom clients often keep an old dat signature but use u32 sprite ids.
         let (def_ext, def_fd, def_fg) = version_defaults(version);
         if !def_ext {
@@ -973,7 +1001,10 @@ fn parser_configs_for(path: &str, signature: u32) -> Vec<DatParserConfig> {
     }
 
     for &version in FALLBACK_VERSIONS {
-        push_config(&mut configs, config_for_version(version, otfi.as_ref(), false));
+        push_config(
+            &mut configs,
+            config_for_version(version, otfi.as_ref(), false),
+        );
         let (def_ext, _, _) = version_defaults(version);
         if !def_ext {
             push_config(
@@ -1089,7 +1120,16 @@ pub fn open_dat_auto(path: &str, force_version: Option<u32>) -> Result<DatFile, 
 const TILE: usize = SPRITE_SIZE; // 32
 const TILE_BYTES: usize = TILE * TILE * 4;
 
-fn sprite_slot(t: &Thing, frame: u32, pz: u32, py: u32, px: u32, layer: u32, ty: u32, tx: u32) -> usize {
+fn sprite_slot(
+    t: &Thing,
+    frame: u32,
+    pz: u32,
+    py: u32,
+    px: u32,
+    layer: u32,
+    ty: u32,
+    tx: u32,
+) -> usize {
     let w = t.width as u32;
     let h = t.height as u32;
     ((((((frame * t.pattern_z as u32 + pz) * t.pattern_y as u32 + py) * t.pattern_x as u32 + px)
@@ -1147,11 +1187,22 @@ fn cell_layers(t: &Thing, layer: Option<u32>) -> Vec<u32> {
 }
 
 /// Sprite ids one cell needs (skips empty slots).
-fn cell_sprite_ids(t: &Thing, frame: u32, px: u32, py: u32, pz: u32, layer: Option<u32>, out: &mut Vec<u32>) {
+fn cell_sprite_ids(
+    t: &Thing,
+    frame: u32,
+    px: u32,
+    py: u32,
+    pz: u32,
+    layer: Option<u32>,
+    out: &mut Vec<u32>,
+) {
     for &l in &cell_layers(t, layer) {
         for ty in 0..t.height as u32 {
             for tx in 0..t.width as u32 {
-                if let Some(&sid) = t.sprite_index.get(sprite_slot(t, frame, pz, py, px, l, ty, tx)) {
+                if let Some(&sid) = t
+                    .sprite_index
+                    .get(sprite_slot(t, frame, pz, py, px, l, ty, tx))
+                {
                     if sid != 0 {
                         out.push(sid);
                     }
@@ -1182,11 +1233,15 @@ pub fn compose_from_decoded(
         for ty in 0..h as u32 {
             for tx in 0..w as u32 {
                 let slot = sprite_slot(t, frame, pz, py, px, l, ty, tx);
-                let Some(&sid) = t.sprite_index.get(slot) else { continue };
+                let Some(&sid) = t.sprite_index.get(slot) else {
+                    continue;
+                };
                 if sid == 0 {
                     continue;
                 }
-                let Some(tile) = decoded.get(&sid) else { continue };
+                let Some(tile) = decoded.get(&sid) else {
+                    continue;
+                };
                 debug_assert_eq!(tile.len(), TILE_BYTES);
                 let dst_x = (w - 1 - tx as usize) * TILE;
                 let dst_y = (h - 1 - ty as usize) * TILE;
@@ -1203,7 +1258,7 @@ pub fn compose_from_decoded(
 }
 
 fn read_decoded(
-    spr: &mut SprManager,
+    spr: &SprManager,
     spr_path: &str,
     ids: &[u32],
     transparent: bool,
@@ -1218,7 +1273,7 @@ fn read_decoded(
 }
 
 pub fn compose_thing_cell(
-    spr: &mut SprManager,
+    spr: &SprManager,
     spr_path: &str,
     t: &Thing,
     frame: u32,
@@ -1236,7 +1291,13 @@ pub fn compose_thing_cell(
 
 /// Nearest-neighbor blit of `src` into `dst`, scaled to fit and centered in a
 /// `cell`×`cell` square whose top-left corner is at (cell_x, 0).
-fn blit_scaled_into_cell(dst: &mut [u8], dst_w: usize, cell_x: usize, cell: usize, src: &ThingRender) {
+fn blit_scaled_into_cell(
+    dst: &mut [u8],
+    dst_w: usize,
+    cell_x: usize,
+    cell: usize,
+    src: &ThingRender,
+) {
     let sw = src.width_px as usize;
     let sh = src.height_px as usize;
     if sw == 0 || sh == 0 {
@@ -1262,7 +1323,7 @@ fn blit_scaled_into_cell(dst: &mut [u8], dst_w: usize, cell_x: usize, cell: usiz
 /// Composes a horizontal strip of thing previews, one `cell`×`cell` square per
 /// thing, in the given order. One request per grid row instead of per thing.
 pub fn compose_things_row(
-    spr: &mut SprManager,
+    spr: &SprManager,
     spr_path: &str,
     things: &[&Thing],
     cell: u32,
@@ -1324,7 +1385,11 @@ pub fn preview_frame(t: &Thing, global_frame: u32, animate_enabled: bool) -> u32
 /// Default preview cell: first frame, pattern (0,0,0) — except outfits, which
 /// face south (pattern_x index 2) when available.
 pub fn preview_pattern(t: &Thing) -> (u32, u32, u32, u32) {
-    let px = if t.is_outfit && t.pattern_x >= 3 { 2 } else { 0 };
+    let px = if t.is_outfit && t.pattern_x >= 3 {
+        2
+    } else {
+        0
+    };
     (0, px, 0, 0)
 }
 
@@ -1332,11 +1397,13 @@ pub fn preview_pattern(t: &Thing) -> (u32, u32, u32, u32) {
 /// columns = pattern_x × layers (directions/addons left-to-right),
 /// rows = pattern_y × frames × pattern_z (animation frames top-to-bottom).
 pub fn compose_thing_sheet(
-    spr: &mut SprManager,
+    spr: &SprManager,
     spr_path: &str,
     t: &Thing,
     transparent: bool,
 ) -> Result<ThingRender, String> {
+    use rayon::prelude::*;
+
     let cell_w = t.width as usize * TILE;
     let cell_h = t.height as usize * TILE;
     let cols = t.pattern_x as usize * t.layers as usize;
@@ -1350,29 +1417,47 @@ pub fn compose_thing_sheet(
     // The sheet covers every frame/pattern/layer combination, i.e. the whole
     // sprite index — read and decode it in one pass instead of once per cell
     // (cells share many sprites, and each read hits the file).
-    let ids: Vec<u32> = t.sprite_index.iter().copied().filter(|&sid| sid != 0).collect();
+    let ids: Vec<u32> = t
+        .sprite_index
+        .iter()
+        .copied()
+        .filter(|&sid| sid != 0)
+        .collect();
     let decoded = read_decoded(spr, spr_path, &ids, transparent)?;
 
-    let mut sheet = vec![0u8; sheet_w * sheet_h * 4];
-
+    let mut cells: Vec<(u32, u32, u32, u32, u32)> = Vec::with_capacity(rows * cols);
     for pz in 0..t.pattern_z as u32 {
         for py in 0..t.pattern_y as u32 {
             for px in 0..t.pattern_x as u32 {
                 for l in 0..t.layers as u32 {
                     for frame in 0..t.frames as u32 {
-                        let cell = compose_from_decoded(&decoded, t, frame, px, py, pz, Some(l));
-                        let ox = (px as usize + l as usize * t.pattern_x as usize) * cell_w;
-                        let oy = ((pz as usize * t.pattern_y as usize + py as usize) * t.frames as usize
-                            + frame as usize)
-                            * cell_h;
-                        for y in 0..cell_h {
-                            let src = y * cell_w * 4;
-                            let dst = ((oy + y) * sheet_w + ox) * 4;
-                            sheet[dst..dst + cell_w * 4].copy_from_slice(&cell.rgba[src..src + cell_w * 4]);
-                        }
+                        cells.push((pz, py, px, l, frame));
                     }
                 }
             }
+        }
+    }
+
+    // Cells are independent (each blends its own canvas from `decoded`), so
+    // compose them in parallel and blit sequentially after.
+    let rendered: Vec<(usize, usize, ThingRender)> = cells
+        .into_par_iter()
+        .map(|(pz, py, px, l, frame)| {
+            let cell = compose_from_decoded(&decoded, t, frame, px, py, pz, Some(l));
+            let ox = (px as usize + l as usize * t.pattern_x as usize) * cell_w;
+            let oy = ((pz as usize * t.pattern_y as usize + py as usize) * t.frames as usize
+                + frame as usize)
+                * cell_h;
+            (ox, oy, cell)
+        })
+        .collect();
+
+    let mut sheet = vec![0u8; sheet_w * sheet_h * 4];
+    for (ox, oy, cell) in &rendered {
+        for y in 0..cell_h {
+            let src = y * cell_w * 4;
+            let dst = ((oy + y) * sheet_w + ox) * 4;
+            sheet[dst..dst + cell_w * 4].copy_from_slice(&cell.rgba[src..src + cell_w * 4]);
         }
     }
 
@@ -1426,18 +1511,20 @@ pub struct SheetLayout {
 /// heights size to the largest sheet they contain, so sheets of differing sizes
 /// stay aligned; each sheet is positioned within its cell per [`SheetLayout`].
 pub fn compose_things_sheet(
-    spr: &mut SprManager,
+    spr: &SprManager,
     spr_path: &str,
     things: &[&Thing],
     transparent: bool,
     layout: &SheetLayout,
 ) -> Result<ThingRender, String> {
+    use rayon::prelude::*;
+
     if things.is_empty() {
         return Err("Nothing to export".to_string());
     }
 
     let sheets: Vec<ThingRender> = things
-        .iter()
+        .par_iter()
         .map(|t| compose_thing_sheet(spr, spr_path, t, transparent))
         .collect::<Result<_, _>>()?;
 
@@ -1495,14 +1582,22 @@ pub fn compose_things_sheet(
 }
 
 pub fn encode_png(render: &ThingRender) -> Result<Vec<u8>, String> {
-    use std::io::Cursor;
-    let img = image::RgbaImage::from_raw(render.width_px, render.height_px, render.rgba.clone())
-        .ok_or_else(|| "Failed to build image".to_string())?;
-    let mut out = Cursor::new(Vec::new());
-    image::DynamicImage::ImageRgba8(img)
-        .write_to(&mut out, image::ImageOutputFormat::Png)
+    use image::codecs::png::PngEncoder;
+    use image::ImageEncoder;
+    let expected = render.width_px as usize * render.height_px as usize * 4;
+    if render.rgba.len() != expected {
+        return Err("Failed to build image".to_string());
+    }
+    let mut out = Vec::new();
+    PngEncoder::new(&mut out)
+        .write_image(
+            &render.rgba,
+            render.width_px,
+            render.height_px,
+            image::ColorType::Rgba8,
+        )
         .map_err(|e| format!("PNG encode failed: {}", e))?;
-    Ok(out.into_inner())
+    Ok(out)
 }
 
 // ---------- Manager ----------
@@ -1513,10 +1608,16 @@ pub struct DatManager {
 
 impl DatManager {
     pub fn new() -> Self {
-        Self { files: HashMap::new() }
+        Self {
+            files: HashMap::new(),
+        }
     }
 
-    pub fn open_file(&mut self, path: String, force_version: Option<u32>) -> Result<DatInfo, String> {
+    pub fn open_file(
+        &mut self,
+        path: String,
+        force_version: Option<u32>,
+    ) -> Result<DatInfo, String> {
         let dat = open_dat_auto(&path, force_version)?;
         let info = dat.info.clone();
         self.files.insert(path, dat);
@@ -1528,8 +1629,10 @@ impl DatManager {
     }
 
     pub fn file(&self, path: &str) -> Result<&DatFile, String> {
-        self.files.get(path).ok_or_else(|| format!("DAT file not open: {}", path))
+        self.files
+            .get(path)
+            .ok_or_else(|| format!("DAT file not open: {}", path))
     }
 }
 
-pub type DatManagerState = Arc<Mutex<DatManager>>;
+pub type DatManagerState = Arc<RwLock<DatManager>>;

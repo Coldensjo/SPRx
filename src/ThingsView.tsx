@@ -4,6 +4,7 @@ import { Copy, FileImage, Filter, Grid3X3, Loader2, Pause, Play, Search, X, Zoom
 import {
 	CombinedSheetLayout,
 	exportThing,
+	exportThings,
 	exportThingsSheet,
 	getThing,
 	getThings,
@@ -846,25 +847,21 @@ export default function ThingsView({
 			}
 			const dir = await openDialog({ directory: true, title: `Choose a folder for ${ids.length} PNGs` });
 			if (!dir || typeof dir !== 'string') return;
-			const sep = dir.includes('\\') ? '\\' : '/';
-			const suffix = mode === 'sheet' ? 'sheet' : 'image';
 			setExporting(true);
-			let ok = 0;
-			const failed: number[] = [];
-			for (const id of ids) {
-				try {
-					const out = `${dir}${sep}${category}_${id}_${suffix}.png`;
-					await exportThing(spr.path, dat.path, category, id, mode, transparent, out);
-					ok++;
-				} catch {
-					failed.push(id);
+			try {
+				const { exported, failed } = await exportThings(spr.path, dat.path, category, ids, mode, transparent, dir);
+				if (failed.length === 0) {
+					showToast('ok', `Exported ${exported} ${category}${exported !== 1 ? 's' : ''} to ${dir}`);
+				} else {
+					showToast(
+						'error',
+						`Exported ${exported}, failed ${failed.length} (${failed.slice(0, 8).join(', ')}${failed.length > 8 ? '…' : ''})`
+					);
 				}
-			}
-			setExporting(false);
-			if (failed.length === 0) {
-				showToast('ok', `Exported ${ok} ${category}${ok !== 1 ? 's' : ''} to ${dir}`);
-			} else {
-				showToast('error', `Exported ${ok}, failed ${failed.length} (${failed.slice(0, 8).join(', ')}${failed.length > 8 ? '…' : ''})`);
+			} catch (e) {
+				showToast('error', String(e));
+			} finally {
+				setExporting(false);
 			}
 		},
 		[doExport, spr.path, dat.path, category, transparent, showToast]

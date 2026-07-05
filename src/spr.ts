@@ -113,6 +113,23 @@ export async function exportThing(
 	await invoke('export_thing', { sprPath, datPath, category, id, mode, transparent, outPath });
 }
 
+export interface ExportThingsResult {
+	exported: number;
+	failed: number[];
+}
+
+export async function exportThings(
+	sprPath: string,
+	datPath: string,
+	category: ThingCategory,
+	ids: number[],
+	mode: 'image' | 'sheet',
+	transparent: boolean,
+	outDir: string
+): Promise<ExportThingsResult> {
+	return invoke<ExportThingsResult>('export_things', { sprPath, datPath, category, ids, mode, transparent, outDir });
+}
+
 export type SheetAlign = 'start' | 'center' | 'end';
 
 /** Layout options for a combined spritesheet — how each thing's sheet is arranged in the grid. */
