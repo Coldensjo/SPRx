@@ -361,6 +361,18 @@ button {
 	border-color: #5ec9a3;
 }
 
+.ss-btn-ghost {
+	background: transparent;
+	border-color: transparent;
+	color: var(--text-muted);
+}
+
+.ss-btn-ghost:hover:not(:disabled) {
+	background: var(--surface-2);
+	border-color: var(--border);
+	color: var(--text);
+}
+
 .ss-selection-bar {
 	display: inline-flex;
 	align-items: center;
@@ -949,6 +961,16 @@ button {
 	display: flex;
 	flex-direction: column;
 	gap: 6px;
+	min-width: 0;
+}
+
+.ss-field-row {
+	display: flex;
+	gap: 12px;
+}
+
+.ss-field-row .ss-field {
+	flex: 1;
 }
 
 .ss-field-label {
@@ -956,7 +978,8 @@ button {
 	color: var(--text-muted);
 }
 
-.ss-field input {
+.ss-field input,
+.ss-field select {
 	height: 32px;
 	padding: 0 10px;
 	background: var(--bg);
@@ -965,16 +988,23 @@ button {
 	color: var(--text);
 	font-size: 13px;
 	outline: none;
+	width: 100%;
 }
 
-.ss-field input:focus {
+.ss-field input:focus,
+.ss-field select:focus {
 	border-color: var(--accent);
 }
 
 .ss-modal-buttons {
 	display: flex;
+	align-items: center;
 	justify-content: flex-end;
 	gap: 8px;
+}
+
+.ss-modal-buttons-spacer {
+	flex: 1;
 }
 
 /* ---------- Toast ---------- */

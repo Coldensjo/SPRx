@@ -10,15 +10,18 @@ import {
 	Minus,
 	PersonStanding,
 	Package,
+	SlidersHorizontal,
 	Sparkles,
 	Square,
 	Wand2,
 	X
 } from 'lucide-react';
 import { closeDat, closeSpr, openDat, OpenDat, openSpr, OpenFile, probePair, ThingCategory } from './spr';
+import { ExportSettings, loadExportSettings, saveExportSettings } from './settings';
 import Landing from './Landing';
 import Viewer from './Viewer';
 import ThingsView from './ThingsView';
+import ExportSettingsDialog from './ExportSettingsDialog';
 
 const RECENT_KEY = 'sprx.recent';
 const MAX_RECENT = 8;
@@ -60,6 +63,13 @@ export default function App() {
 	const [dropActive, setDropActive] = useState(false);
 	const [recent, setRecent] = useState<string[]>(loadRecent);
 	const [toast, setToast] = useState<Toast | null>(null);
+	const [exportSettings, setExportSettings] = useState<ExportSettings>(loadExportSettings);
+	const [showExportSettings, setShowExportSettings] = useState(false);
+
+	const applyExportSettings = useCallback((settings: ExportSettings) => {
+		setExportSettings(settings);
+		saveExportSettings(settings);
+	}, []);
 
 	const showToast = useCallback((kind: Toast['kind'], msg: string) => {
 		setToast({ kind, msg });
@@ -255,6 +265,10 @@ export default function App() {
 								<FolderOpen size={14} />
 								Open other
 							</button>
+							<button className="ss-icon-btn" onClick={() => setShowExportSettings(true)}>
+								<SlidersHorizontal size={14} />
+								Export settings
+							</button>
 							<button className="ss-icon-btn" onClick={() => void closeFile()}>
 								<X size={14} />
 								Close file
@@ -285,6 +299,7 @@ export default function App() {
 								onTransparentChange={transparent =>
 									setFiles(f => (f ? { ...f, transparent } : f))
 								}
+								exportSettings={exportSettings}
 								showToast={showToast}
 							/>
 						) : null}
@@ -298,6 +313,14 @@ export default function App() {
 					dropActive={dropActive}
 					onPick={() => void pickFile()}
 					onOpenRecent={path => void openFile(path)}
+				/>
+			)}
+
+			{showExportSettings && (
+				<ExportSettingsDialog
+					settings={exportSettings}
+					onSave={applyExportSettings}
+					onClose={() => setShowExportSettings(false)}
 				/>
 			)}
 

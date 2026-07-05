@@ -111,16 +111,39 @@ export async function exportThing(
 	await invoke('export_thing', { sprPath, datPath, category, id, mode, transparent, outPath });
 }
 
-/** Exports several things into one combined spritesheet PNG (sheets stacked vertically). */
+export type SheetAlign = 'start' | 'center' | 'end';
+
+/** Layout options for a combined spritesheet — how each thing's sheet is arranged in the grid. */
+export interface CombinedSheetLayout {
+	/** Number of columns; sheets flow left-to-right, top-to-bottom. 1 = vertical, ids.length = horizontal. */
+	columns: number;
+	/** Transparent padding in pixels between adjacent cells. */
+	spacing: number;
+	/** How each sheet is aligned within its (possibly larger) grid cell. */
+	align: SheetAlign;
+}
+
+/** Exports several things into one combined spritesheet PNG using the given grid layout. */
 export async function exportThingsSheet(
 	sprPath: string,
 	datPath: string,
 	category: ThingCategory,
 	ids: number[],
 	transparent: boolean,
+	layout: CombinedSheetLayout,
 	outPath: string
 ): Promise<void> {
-	await invoke('export_things_sheet', { sprPath, datPath, category, ids, transparent, outPath });
+	await invoke('export_things_sheet', {
+		sprPath,
+		datPath,
+		category,
+		ids,
+		transparent,
+		columns: layout.columns,
+		spacing: layout.spacing,
+		align: layout.align,
+		outPath
+	});
 }
 
 export function thingUrl(

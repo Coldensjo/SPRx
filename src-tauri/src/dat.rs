@@ -1376,14 +1376,54 @@ pub fn compose_thing_sheet(
     })
 }
 
-/// Combines several things into a single spritesheet by stacking each thing's
-/// own full sheet (see [`compose_thing_sheet`]) vertically, left-aligned. The
-/// combined width is the widest individual sheet; the height is their sum.
+/// How each thing's sheet is placed within its grid cell along one axis.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Align {
+    Start,
+    Center,
+    End,
+}
+
+impl Align {
+    pub fn parse(s: &str) -> Align {
+        match s {
+            "center" => Align::Center,
+            "end" => Align::End,
+            _ => Align::Start,
+        }
+    }
+
+    /// Offset of a `size`-wide item inside a `cell`-wide slot.
+    fn offset(self, cell: usize, size: usize) -> usize {
+        match self {
+            Align::Start => 0,
+            Align::Center => (cell.saturating_sub(size)) / 2,
+            Align::End => cell.saturating_sub(size),
+        }
+    }
+}
+
+/// Layout options for combining several things into one spritesheet.
+pub struct SheetLayout {
+    /// Number of columns; sheets flow left-to-right, top-to-bottom (row-major).
+    /// 1 = vertical stack, `things.len()` = single horizontal row.
+    pub columns: usize,
+    /// Transparent pixels of blank padding between adjacent cells.
+    pub spacing: usize,
+    /// Alignment of each sheet within its (possibly larger) grid cell.
+    pub align: Align,
+}
+
+/// Combines several things into a single spritesheet, arranging each thing's own
+/// full sheet (see [`compose_thing_sheet`]) into a grid. Column widths and row
+/// heights size to the largest sheet they contain, so sheets of differing sizes
+/// stay aligned; each sheet is positioned within its cell per [`SheetLayout`].
 pub fn compose_things_sheet(
     spr: &mut SprManager,
     spr_path: &str,
     things: &[&Thing],
     transparent: bool,
+    layout: &SheetLayout,
 ) -> Result<ThingRender, String> {
     if things.is_empty() {
         return Err("Nothing to export".to_string());
@@ -1394,23 +1434,50 @@ pub fn compose_things_sheet(
         .map(|t| compose_thing_sheet(spr, spr_path, t, transparent))
         .collect::<Result<_, _>>()?;
 
-    let total_w = sheets.iter().map(|s| s.width_px as usize).max().unwrap_or(0);
-    let total_h: usize = sheets.iter().map(|s| s.height_px as usize).sum();
+    let n = sheets.len();
+    let cols = layout.columns.clamp(1, n);
+    let rows = n.div_ceil(cols);
+    let gap = layout.spacing;
+
+    // Per-column widths and per-row heights sized to the largest sheet in each.
+    let mut col_w = vec![0usize; cols];
+    let mut row_h = vec![0usize; rows];
+    for (i, s) in sheets.iter().enumerate() {
+        let c = i % cols;
+        let r = i / cols;
+        col_w[c] = col_w[c].max(s.width_px as usize);
+        row_h[r] = row_h[r].max(s.height_px as usize);
+    }
+
+    // Prefix offsets (including inter-cell spacing) for each column and row.
+    let mut col_x = vec![0usize; cols];
+    for c in 1..cols {
+        col_x[c] = col_x[c - 1] + col_w[c - 1] + gap;
+    }
+    let mut row_y = vec![0usize; rows];
+    for r in 1..rows {
+        row_y[r] = row_y[r - 1] + row_h[r - 1] + gap;
+    }
+
+    let total_w = col_w.iter().sum::<usize>() + gap * cols.saturating_sub(1);
+    let total_h = row_h.iter().sum::<usize>() + gap * rows.saturating_sub(1);
     if total_w * total_h > 64 * 1024 * 1024 {
         return Err("Combined spritesheet would be too large".to_string());
     }
 
     let mut out = vec![0u8; total_w * total_h * 4];
-    let mut oy = 0usize;
-    for s in &sheets {
+    for (i, s) in sheets.iter().enumerate() {
+        let c = i % cols;
+        let r = i / cols;
         let sw = s.width_px as usize;
         let sh = s.height_px as usize;
+        let ox = col_x[c] + layout.align.offset(col_w[c], sw);
+        let oy = row_y[r] + layout.align.offset(row_h[r], sh);
         for y in 0..sh {
             let src = y * sw * 4;
-            let dst = ((oy + y) * total_w) * 4;
+            let dst = ((oy + y) * total_w + ox) * 4;
             out[dst..dst + sw * 4].copy_from_slice(&s.rgba[src..src + sw * 4]);
         }
-        oy += sh;
     }
 
     Ok(ThingRender {

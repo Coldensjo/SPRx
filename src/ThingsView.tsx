@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { Copy, FileImage, Grid3X3, Loader2, Pause, Play, Search, X, ZoomIn, ZoomOut } from 'lucide-react';
 import {
+	CombinedSheetLayout,
 	exportThing,
 	exportThingsSheet,
 	getThing,
@@ -15,6 +16,7 @@ import {
 	thingUrl
 } from './spr';
 import type { Toast } from './App';
+import type { ExportSettings } from './settings';
 
 const ZOOM_LEVELS = [48, 64, 96, 128];
 const GRID_PAD = 8;
@@ -47,6 +49,7 @@ interface Props {
 	onSelect: (id: number) => void;
 	transparent: boolean;
 	onTransparentChange: (transparent: boolean) => void;
+	exportSettings: ExportSettings;
 	showToast: (kind: Toast['kind'], msg: string) => void;
 }
 
@@ -54,6 +57,14 @@ interface MenuState {
 	x: number;
 	y: number;
 	id: number;
+}
+
+/** Resolves the saved export settings into the column count the backend expects for `n` things. */
+function resolveColumns(s: ExportSettings, n: number): number {
+	if (s.arrangement === 'vertical') return 1;
+	if (s.arrangement === 'horizontal') return n;
+	const count = Math.max(1, Math.min(n, s.gridCount));
+	return s.gridBy === 'cols' ? count : Math.ceil(n / count);
 }
 
 const CATEGORY_LABEL: Record<ThingCategory, string> = {
@@ -356,6 +367,7 @@ export default function ThingsView({
 	onSelect,
 	transparent,
 	onTransparentChange,
+	exportSettings,
 	showToast
 }: Props) {
 	const [things, setThings] = useState<ThingSummary[] | null>(null);
@@ -791,11 +803,16 @@ export default function ThingsView({
 		[doExport, spr.path, dat.path, category, transparent, showToast]
 	);
 
-	// Exports every selected thing into a single combined spritesheet PNG,
-	// each thing's own sheet stacked vertically.
+	// Exports the selected things into a single combined spritesheet PNG using
+	// the layout preset from Export settings (configurable via the settings menu).
 	const exportCombinedSheet = useCallback(async () => {
 		const ids = [...selectedIdsRef.current].sort((a, b) => a - b);
 		if (ids.length === 0) return;
+		const layout: CombinedSheetLayout = {
+			columns: resolveColumns(exportSettings, ids.length),
+			spacing: exportSettings.spacing,
+			align: exportSettings.align
+		};
 		const out = await saveDialog({
 			defaultPath: `${category}_${ids.length}_sheet.png`,
 			filters: [{ name: 'PNG image', extensions: ['png'] }]
@@ -803,13 +820,13 @@ export default function ThingsView({
 		if (!out) return;
 		setExporting(true);
 		try {
-			await exportThingsSheet(spr.path, dat.path, category, ids, transparent, out);
+			await exportThingsSheet(spr.path, dat.path, category, ids, transparent, layout, out);
 			showToast('ok', `Exported ${ids.length} ${category}s to a combined spritesheet`);
 		} catch (e) {
 			showToast('error', String(e));
 		}
 		setExporting(false);
-	}, [spr.path, dat.path, category, transparent, showToast]);
+	}, [exportSettings, spr.path, dat.path, category, transparent, showToast]);
 
 	if (loadError) {
 		return (
@@ -1139,6 +1156,7 @@ export default function ThingsView({
 					)}
 				</div>
 			)}
+
 		</>
 	);
 }

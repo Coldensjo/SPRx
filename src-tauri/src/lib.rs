@@ -115,9 +115,11 @@ fn export_thing(
     std::fs::write(&out_path, png).map_err(|e| format!("Failed to write {}: {}", out_path, e))
 }
 
-/// Exports several things into one combined spritesheet PNG: each thing's own
-/// full sheet stacked vertically. Used when multiple things are selected.
+/// Exports several things into one combined spritesheet PNG, arranging each
+/// thing's own full sheet into a grid per the caller's layout options. Used
+/// when multiple things are selected.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 fn export_things_sheet(
     spr_state: State<SprManagerState>,
     dat_state: State<DatManagerState>,
@@ -126,6 +128,9 @@ fn export_things_sheet(
     category: String,
     ids: Vec<u32>,
     transparent: bool,
+    columns: usize,
+    spacing: usize,
+    align: String,
     out_path: String,
 ) -> Result<(), String> {
     let cat = Category::parse(&category).ok_or_else(|| format!("invalid category: {}", category))?;
@@ -136,8 +141,13 @@ fn export_things_sheet(
         .map(|&id| file.thing(cat, id).ok_or_else(|| format!("unknown {} id {}", category, id)))
         .collect::<Result<_, _>>()?;
 
+    let layout = dat::SheetLayout {
+        columns: columns.max(1),
+        spacing: spacing.min(256),
+        align: dat::Align::parse(&align),
+    };
     let mut spr_manager = spr_state.lock().map_err(|e| format!("lock: {e}"))?;
-    let render = dat::compose_things_sheet(&mut spr_manager, &spr_path, &things, transparent)?;
+    let render = dat::compose_things_sheet(&mut spr_manager, &spr_path, &things, transparent, &layout)?;
     let png = dat::encode_png(&render)?;
     std::fs::write(&out_path, png).map_err(|e| format!("Failed to write {}: {}", out_path, e))
 }
