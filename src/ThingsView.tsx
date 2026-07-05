@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
-import { Copy, FileImage, Grid3X3, Loader2, Pause, Play, Search, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { Copy, FileImage, Filter, Grid3X3, Loader2, Pause, Play, Search, X, ZoomIn, ZoomOut } from 'lucide-react';
 import {
 	CombinedSheetLayout,
 	exportThing,
@@ -32,6 +32,20 @@ const MISSILE_DIRECTION_LABELS: Record<string, string> = {
 	'1,2': 'S',
 	'2,2': 'SE'
 };
+
+// Structural filters describe a thing's shape rather than a .dat attribute
+// flag, so they're computed from the summary fields instead of `propNames`.
+interface StructuralFilter {
+	key: string;
+	label: string;
+	test: (t: ThingSummary) => boolean;
+}
+
+const STRUCTURAL_FILTERS: StructuralFilter[] = [
+	{ key: 'animated', label: 'Animated', test: t => t.frames > 1 },
+	{ key: 'multiTile', label: 'Multi-tile', test: t => t.width > 1 || t.height > 1 },
+	{ key: 'layered', label: 'Layered', test: t => t.layers > 1 }
+];
 
 function thingAnimates(frames: number, animateEnabled: boolean): boolean {
 	return frames > 1 && animateEnabled;
@@ -383,6 +397,12 @@ export default function ThingsView({
 	const [showAllMissileDirections, setShowAllMissileDirections] = useState(false);
 	const [gridFrame, setGridFrame] = useState(0);
 
+	// Property/structural filters narrow the grid (unlike the search box, which
+	// jumps to a match). `activeFilters` holds attribute-flag names plus the
+	// structural filter keys; a thing must satisfy every active filter (AND).
+	const [activeFilters, setActiveFilters] = useState<Set<string>>(new Set());
+	const [showFilters, setShowFilters] = useState(false);
+
 	// Multi-selection. `selectedIds` is the full set; `anchorId` is the pivot
 	// for shift-range selection; `selectedId` (from props) stays the primary
 	// item shown in the details pane.
@@ -396,6 +416,8 @@ export default function ThingsView({
 		setPlaying(true);
 		setSelectedIds(new Set());
 		setAnchorId(null);
+		setActiveFilters(new Set());
+		setShowFilters(false);
 	}, [category]);
 
 	const scrollRef = useRef<HTMLDivElement>(null);
@@ -489,7 +511,26 @@ export default function ThingsView({
 		return (t: ThingSummary) => !!t.name?.toLowerCase().includes(needle);
 	}, [search]);
 
-	const shown = things ?? [];
+	// Attribute-flag names present in this category, for the filter popover.
+	const availableProps = useMemo(() => {
+		const set = new Set<string>();
+		for (const t of things ?? []) for (const p of t.propNames) set.add(p);
+		return [...set].sort((a, b) => a.localeCompare(b));
+	}, [things]);
+
+	// A thing passes if it satisfies every active filter (structural + property).
+	const filterFn = useMemo(() => {
+		if (activeFilters.size === 0) return null;
+		const structural = STRUCTURAL_FILTERS.filter(f => activeFilters.has(f.key));
+		const propNames = [...activeFilters].filter(k => !STRUCTURAL_FILTERS.some(f => f.key === k));
+		return (t: ThingSummary) =>
+			structural.every(f => f.test(t)) && propNames.every(name => t.propNames.includes(name));
+	}, [activeFilters]);
+
+	const shown = useMemo(() => {
+		const all = things ?? [];
+		return filterFn ? all.filter(filterFn) : all;
+	}, [things, filterFn]);
 
 	const gridCells = useMemo(
 		() => shown.map(defaultGridCell),
@@ -576,6 +617,32 @@ export default function ThingsView({
 		},
 		[onSelect]
 	);
+
+	const toggleFilter = useCallback((key: string) => {
+		setActiveFilters(prev => {
+			const next = new Set(prev);
+			if (next.has(key)) next.delete(key);
+			else next.add(key);
+			return next;
+		});
+	}, []);
+
+	// Close the filter popover on an outside click or Escape.
+	useEffect(() => {
+		if (!showFilters) return;
+		const onDown = (e: MouseEvent) => {
+			if (!(e.target as HTMLElement).closest('.ss-filter')) setShowFilters(false);
+		};
+		const onKey = (e: KeyboardEvent) => {
+			if (e.key === 'Escape') setShowFilters(false);
+		};
+		window.addEventListener('mousedown', onDown);
+		window.addEventListener('keydown', onKey);
+		return () => {
+			window.removeEventListener('mousedown', onDown);
+			window.removeEventListener('keydown', onKey);
+		};
+	}, [showFilters]);
 
 	// Ctrl/Cmd+A selects everything; Escape clears the selection.
 	useEffect(() => {
@@ -693,10 +760,10 @@ export default function ThingsView({
 
 	// When the search matches something, select it and scroll it into view.
 	useEffect(() => {
-		if (!matchFn || !things || cols < 1) return;
-		const idx = things.findIndex(matchFn);
+		if (!matchFn || cols < 1) return;
+		const idx = shown.findIndex(matchFn);
 		if (idx < 0) return;
-		onSelect(things[idx].id);
+		onSelect(shown[idx].id);
 		const el = scrollRef.current;
 		if (!el) return;
 		const row = Math.floor(idx / cols);
@@ -706,7 +773,7 @@ export default function ThingsView({
 			el.scrollTop = Math.max(0, cellTop - (el.clientHeight - cellH) / 2);
 		}
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [matchFn, things, cols, cellH]);
+	}, [matchFn, shown, cols, cellH]);
 
 	const gridAnimates = useMemo(
 		() => animateEnabled && gridCells.some(cell => cell.thing.frames > 1),
@@ -867,6 +934,60 @@ export default function ThingsView({
 						<button className="ss-search-clear" onClick={() => setSearch('')} aria-label="Clear search">
 							<X size={13} />
 						</button>
+					)}
+				</div>
+
+				<div className="ss-filter">
+					<button
+						className={`ss-btn ss-filter-btn${activeFilters.size > 0 ? ' ss-filter-btn-active' : ''}`}
+						onClick={() => setShowFilters(s => !s)}
+						title="Filter the grid by property"
+					>
+						<Filter size={14} />
+						Filter
+						{activeFilters.size > 0 && <span className="ss-filter-count">{activeFilters.size}</span>}
+					</button>
+					{showFilters && (
+						<div className="ss-filter-popover" onMouseDown={e => e.stopPropagation()}>
+							<div className="ss-filter-head">
+								<span>Filters</span>
+								{activeFilters.size > 0 && (
+									<button className="ss-filter-reset" onClick={() => setActiveFilters(new Set())}>
+										Clear all
+									</button>
+								)}
+							</div>
+							<div className="ss-filter-section">Structure</div>
+							<div className="ss-filter-list">
+								{STRUCTURAL_FILTERS.map(f => (
+									<label key={f.key} className="ss-filter-item">
+										<input
+											type="checkbox"
+											checked={activeFilters.has(f.key)}
+											onChange={() => toggleFilter(f.key)}
+										/>
+										{f.label}
+									</label>
+								))}
+							</div>
+							{availableProps.length > 0 && (
+								<>
+									<div className="ss-filter-section">Properties</div>
+									<div className="ss-filter-list ss-filter-props">
+										{availableProps.map(name => (
+											<label key={name} className="ss-filter-item">
+												<input
+													type="checkbox"
+													checked={activeFilters.has(name)}
+													onChange={() => toggleFilter(name)}
+												/>
+												{name}
+											</label>
+										))}
+									</div>
+								</>
+							)}
+						</div>
 					)}
 				</div>
 

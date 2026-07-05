@@ -454,6 +454,110 @@ button {
 	background: var(--surface-2);
 }
 
+/* ---------- Filter popover ---------- */
+.ss-filter {
+	position: relative;
+	display: inline-flex;
+}
+
+.ss-filter-btn {
+	position: relative;
+}
+
+.ss-filter-btn-active {
+	border-color: var(--accent);
+	color: var(--text);
+}
+
+.ss-filter-count {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 16px;
+	height: 16px;
+	padding: 0 4px;
+	border-radius: 8px;
+	background: var(--accent);
+	color: #fff;
+	font-size: 11px;
+	font-variant-numeric: tabular-nums;
+}
+
+.ss-filter-popover {
+	position: absolute;
+	top: calc(100% + 6px);
+	left: 0;
+	z-index: 3000;
+	width: 260px;
+	max-height: 60vh;
+	overflow-y: auto;
+	background: var(--surface);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	padding: 8px;
+	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+.ss-filter-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	font-size: 13px;
+	font-weight: 600;
+	color: var(--text);
+	padding: 2px 4px 6px;
+}
+
+.ss-filter-reset {
+	font-size: 12px;
+	font-weight: 400;
+	color: var(--accent);
+}
+
+.ss-filter-reset:hover {
+	text-decoration: underline;
+}
+
+.ss-filter-section {
+	font-size: 11px;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	color: var(--text-muted);
+	padding: 8px 4px 4px;
+}
+
+.ss-filter-list {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.ss-filter-props {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 2px 8px;
+}
+
+.ss-filter-item {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 4px 6px;
+	border-radius: var(--radius);
+	font-size: 13px;
+	color: var(--text);
+	cursor: pointer;
+}
+
+.ss-filter-item:hover {
+	background: var(--surface-2);
+}
+
+.ss-filter-item input {
+	cursor: pointer;
+	accent-color: var(--accent);
+}
+
 .ss-filter-tabs {
 	display: flex;
 	align-items: stretch;

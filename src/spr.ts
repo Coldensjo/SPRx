@@ -56,6 +56,8 @@ export interface ThingSummary {
 	patternZ: number;
 	frames: number;
 	animateAlways: boolean;
+	/** Names of the thing's attribute flags (e.g. "stackable", "light"). */
+	propNames: string[];
 	name?: string;
 }
 

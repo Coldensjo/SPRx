@@ -47,6 +47,10 @@ struct ThingSummary {
     pattern_z: u8,
     frames: u8,
     animate_always: bool,
+    /// Names of the thing's attribute flags (e.g. "stackable", "container",
+    /// "light"), so the frontend can filter the grid by property without
+    /// fetching each thing's full detail.
+    prop_names: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     name: Option<String>,
 }
@@ -69,6 +73,7 @@ fn get_things(state: State<DatManagerState>, path: String, category: String) -> 
             pattern_z: t.pattern_z,
             frames: t.frames,
             animate_always: dat::thing_animate_always(t),
+            prop_names: t.props.iter().map(|p| p.name.clone()).collect(),
             name: t.name.clone(),
         })
         .collect())
