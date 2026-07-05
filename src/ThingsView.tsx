@@ -134,7 +134,9 @@ const AnimatedThingCell = memo(function AnimatedThingCell({
 	dir?: number;
 	diry?: number;
 }) {
-	const shown = frame % thing.frames;
+	// Outfits: frame 0 is the standing pose, so loop the walking frames (1..n-1).
+	const start = category === 'outfit' && thing.frames > 1 ? 1 : 0;
+	const shown = start + (frame % (thing.frames - start));
 	return (
 		<div className="ss-cell-sprite ss-cell-sprite-anim" style={{ width: zoom, height: zoom }}>
 			{Array.from({ length: thing.frames }, (_, f) => (
@@ -434,7 +436,9 @@ export default function ThingsView({
 			.then(d => {
 				if (!cancelled) {
 					setDetail(d);
-					setFrame(0);
+					// Outfits: frame 0 is the standing pose, so start on the
+					// first walking frame.
+					setFrame(d.isOutfit && d.frames > 1 ? 1 : 0);
 					setDir(d.isOutfit && d.patternX >= 3 ? 2 : 0);
 				}
 			})
@@ -449,7 +453,12 @@ export default function ThingsView({
 	// Animation loop for the details preview
 	useEffect(() => {
 		if (!detail || !thingAnimates(detail.frames, animateEnabled) || !playing) return;
-		const t = setInterval(() => setFrame(f => (f + 1) % detail.frames), ANIM_INTERVAL_MS);
+		// Outfits: skip frame 0 (standing) and loop the walking frames (1..n-1).
+		const start = detail.isOutfit && detail.frames > 1 ? 1 : 0;
+		const t = setInterval(
+			() => setFrame(f => (f + 1 < detail.frames ? f + 1 : start)),
+			ANIM_INTERVAL_MS
+		);
 		return () => clearInterval(t);
 	}, [detail, playing, animateEnabled]);
 
