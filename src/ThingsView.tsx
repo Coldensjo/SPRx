@@ -55,8 +55,8 @@ function thingAnimates(frames: number, animateEnabled: boolean): boolean {
 	return frames > 1 && animateEnabled;
 }
 
-function defaultAnimateEnabled(category: ThingCategory): boolean {
-	return category !== 'item';
+function defaultAnimateEnabled(_category: ThingCategory): boolean {
+	return true;
 }
 
 interface Props {
