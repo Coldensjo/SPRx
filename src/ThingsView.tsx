@@ -682,12 +682,15 @@ export default function ThingsView({
 				return; // keep the anchor so the range can be re-dragged
 			}
 			if (additive) {
+				// Ctrl+click/drag: toggle the cell and enable painting to add more via drag
+				e.preventDefault();
 				setSelectedIds(prev => {
 					const next = new Set(prev);
 					if (next.has(id)) next.delete(id);
 					else next.add(id);
 					return next;
 				});
+				setPainting(true);
 			} else {
 				// Plain press: select this one and begin a paint-drag. Moving the
 				// cursor over more cells adds them; re-crossing never removes.
