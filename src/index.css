@@ -711,10 +711,18 @@ button {
 	flex-shrink: 0;
 }
 
+.ss-details-top {
+	flex-shrink: 0;
+	padding: 14px 14px 0;
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+
 .ss-details-scroll {
 	flex: 1;
 	overflow-y: auto;
-	padding: 14px;
+	padding: 12px 14px 14px;
 	display: flex;
 	flex-direction: column;
 	gap: 12px;
@@ -728,6 +736,8 @@ button {
 	background: var(--sprite-bg);
 	border: 1px solid var(--border);
 	min-height: 88px;
+	max-height: 320px;
+	overflow: auto;
 }
 
 .ss-details-name {
@@ -778,6 +788,10 @@ button {
 	display: flex;
 	flex-direction: column;
 	gap: 6px;
+}
+
+.ss-details-actions .ss-btn {
+	justify-content: center;
 }
 
 .ss-details-empty {
@@ -934,6 +948,26 @@ button {
 
 .ss-missile-dir-cell-empty {
 	opacity: 0.35;
+}
+
+.ss-pattern-grid {
+	display: grid;
+	gap: 1px;
+	background: var(--border);
+	flex-shrink: 0;
+}
+
+.ss-pattern-cell {
+	position: relative;
+	background: var(--sprite-bg);
+	overflow: hidden;
+}
+
+.ss-pattern-cell img {
+	position: absolute;
+	top: 0;
+	left: 0;
+	image-rendering: pixelated;
 }
 
 .ss-cell-id {

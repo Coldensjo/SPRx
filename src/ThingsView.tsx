@@ -22,6 +22,8 @@ import type { ExportSettings } from './settings';
 const ZOOM_LEVELS = [48, 64, 96, 128];
 const GRID_PAD = 8;
 const ANIM_INTERVAL_MS = 220;
+// Usable width inside the details preview box (260px panel minus its padding/border).
+const PATTERN_GRID_MAX_W = 200;
 const DIRECTIONS = ['North', 'East', 'South', 'West'];
 const MISSILE_DIRECTION_LABELS: Record<string, string> = {
 	'0,0': 'NW',
@@ -258,6 +260,74 @@ const MissileDirectionGrid = memo(function MissileDirectionGrid({
 	);
 });
 
+/** Every (px, py, pz) pattern combo for a thing, in sheet order (z outermost, x innermost). */
+function patternSlots(thing: ThingDetail): Array<{ key: string; px: number; py: number; pz: number }> {
+	const slots: Array<{ key: string; px: number; py: number; pz: number }> = [];
+	for (let pz = 0; pz < thing.patternZ; pz++) {
+		for (let py = 0; py < thing.patternY; py++) {
+			for (let px = 0; px < thing.patternX; px++) {
+				slots.push({ key: `${px}-${py}-${pz}`, px, py, pz });
+			}
+		}
+	}
+	return slots;
+}
+
+// Details-pane preview for a thing with more than one pattern variant (e.g. a
+// stack of coins, a multi-shape wall, a multi-color splash): shows every
+// pattern combo at once instead of just the first one.
+const PatternPreviewGrid = memo(function PatternPreviewGrid({
+	spr,
+	dat,
+	category,
+	detail,
+	transparent,
+	frame,
+	cellW,
+	cellH
+}: {
+	spr: OpenFile;
+	dat: OpenDat;
+	category: ThingCategory;
+	detail: ThingDetail;
+	transparent: boolean;
+	frame: number;
+	cellW: number;
+	cellH: number;
+}) {
+	const slots = useMemo(() => patternSlots(detail), [detail]);
+	return (
+		<div
+			className="ss-pattern-grid"
+			style={{
+				gridTemplateColumns: `repeat(${detail.patternX}, ${cellW}px)`,
+				gridTemplateRows: `repeat(${detail.patternY * detail.patternZ}, ${cellH}px)`
+			}}
+		>
+			{slots.map(s => (
+				<div
+					key={s.key}
+					className="ss-pattern-cell"
+					style={{ width: cellW, height: cellH }}
+					title={detail.patternZ > 1 ? `pattern ${s.px},${s.py},${s.pz}` : `pattern ${s.px},${s.py}`}
+				>
+					{Array.from({ length: detail.frames }, (_, f) => (
+						<img
+							key={f}
+							src={thingUrl(spr, dat, category, detail.id, transparent, f, s.px, s.py, s.pz)}
+							style={{ display: f === frame ? 'block' : 'none' }}
+							width={cellW}
+							height={cellH}
+							draggable={false}
+							alt=""
+						/>
+					))}
+				</div>
+			))}
+		</div>
+	);
+});
+
 // One atlas image per grid row: each thing occupies a zoom×zoom square.
 const ThingRow = memo(function ThingRow({
 	spr,
@@ -409,7 +479,6 @@ export default function ThingsView({
 	// item shown in the details pane.
 	const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
 	const [anchorId, setAnchorId] = useState<number | null>(null);
-	const [exporting, setExporting] = useState(false);
 
 	useEffect(() => {
 		setAnimateEnabled(defaultAnimateEnabled(category));
@@ -847,7 +916,6 @@ export default function ThingsView({
 			}
 			const dir = await openDialog({ directory: true, title: `Choose a folder for ${ids.length} PNGs` });
 			if (!dir || typeof dir !== 'string') return;
-			setExporting(true);
 			try {
 				const { exported, failed } = await exportThings(spr.path, dat.path, category, ids, mode, transparent, dir);
 				if (failed.length === 0) {
@@ -860,8 +928,6 @@ export default function ThingsView({
 				}
 			} catch (e) {
 				showToast('error', String(e));
-			} finally {
-				setExporting(false);
 			}
 		},
 		[doExport, spr.path, dat.path, category, transparent, showToast]
@@ -882,14 +948,12 @@ export default function ThingsView({
 			filters: [{ name: 'PNG image', extensions: ['png'] }]
 		});
 		if (!out) return;
-		setExporting(true);
 		try {
 			await exportThingsSheet(spr.path, dat.path, category, ids, transparent, layout, out);
 			showToast('ok', `Exported ${ids.length} ${category}s to a combined spritesheet`);
 		} catch (e) {
 			showToast('error', String(e));
 		}
-		setExporting(false);
 	}, [exportSettings, spr.path, dat.path, category, transparent, showToast]);
 
 	if (loadError) {
@@ -915,6 +979,17 @@ export default function ThingsView({
 	const hasFrames = detail !== null && detail.frames > 1;
 	const isPlaying = hasFrames && thingAnimates(detail!.frames, animateEnabled) && playing;
 	const showDirs = detail !== null && detail.isOutfit && detail.patternX >= 2;
+	// Outfits show one facing at a time via the direction buttons above; every
+	// other category with more than one pattern combo gets the full grid.
+	const showPatternGrid =
+		detail !== null && !detail.isOutfit && detail.patternX * detail.patternY * detail.patternZ > 1;
+	const patternTileW = detail ? detail.width * 32 : 0;
+	const patternTileH = detail ? detail.height * 32 : 0;
+	const patternScale = showPatternGrid
+		? Math.min(1, PATTERN_GRID_MAX_W / (detail!.patternX * patternTileW))
+		: 1;
+	const patternCellW = Math.max(8, Math.round(patternTileW * patternScale));
+	const patternCellH = Math.max(8, Math.round(patternTileH * patternScale));
 
 	return (
 		<>
@@ -1028,43 +1103,6 @@ export default function ThingsView({
 						<ZoomIn size={14} />
 					</button>
 				</div>
-
-				{selectedIds.size > 0 && (
-					<div className="ss-selection-bar">
-						<span className="ss-selection-count">{selectedIds.size} selected</span>
-						<button
-							className="ss-btn"
-							disabled={exporting}
-							onClick={() => void exportSelected('image')}
-							title="Export each selected thing as a PNG"
-						>
-							{exporting ? <Loader2 size={14} className="ss-spin" /> : <FileImage size={14} />}
-							Export PNG
-						</button>
-						<button
-							className="ss-btn"
-							disabled={exporting}
-							onClick={() => void exportSelected('sheet')}
-							title="Export each selected thing as a spritesheet PNG"
-						>
-							<Grid3X3 size={14} />
-							Export sheet
-						</button>
-						<button
-							className="ss-btn"
-							disabled={exporting}
-							onClick={() => void exportCombinedSheet()}
-							title="Export all selected things into one combined spritesheet PNG"
-						>
-							<Grid3X3 size={14} />
-							Combined sheet
-						</button>
-						<button className="ss-btn" onClick={() => setSelectedIds(new Set())} title="Clear selection">
-							<X size={14} />
-							Clear
-						</button>
-					</div>
-				)}
 			</div>
 
 			<div className="ss-things-body">
@@ -1126,88 +1164,123 @@ export default function ThingsView({
 						)}
 					</div>
 					{detail ? (
-						<div className="ss-details-scroll">
-							<div className="ss-details-preview">
-								{/* All frames stay mounted so the browser caches them; only the
-								    current one is visible, giving flicker-free animation. */}
-								{Array.from({ length: detail.frames }).map((_, f) => (
-									<img
-										key={f}
-										src={thingUrl(spr, dat, category, detail.id, transparent, f, showDirs ? dir : undefined)}
-										style={{
-											imageRendering: 'pixelated',
-											display: f === frame ? 'block' : 'none'
-										}}
-										width={detail.width * 32 * (detail.width > 1 || detail.height > 1 ? 1 : 2)}
-										draggable={false}
-										alt=""
-									/>
-								))}
-							</div>
-							{isPlaying && (
-								<div className="ss-details-anim">
-									frame {frame + 1}/{detail.frames}
+						<>
+							<div className="ss-details-top">
+								<div className="ss-details-preview">
+									{showPatternGrid ? (
+										<PatternPreviewGrid
+											spr={spr}
+											dat={dat}
+											category={category}
+											detail={detail}
+											transparent={transparent}
+											frame={frame}
+											cellW={patternCellW}
+											cellH={patternCellH}
+										/>
+									) : (
+										// All frames stay mounted so the browser caches them; only the
+										// current one is visible, giving flicker-free animation.
+										Array.from({ length: detail.frames }).map((_, f) => (
+											<img
+												key={f}
+												src={thingUrl(spr, dat, category, detail.id, transparent, f, showDirs ? dir : undefined)}
+												style={{
+													imageRendering: 'pixelated',
+													display: f === frame ? 'block' : 'none'
+												}}
+												width={detail.width * 32 * (detail.width > 1 || detail.height > 1 ? 1 : 2)}
+												draggable={false}
+												alt=""
+											/>
+										))
+									)}
 								</div>
-							)}
-							{showDirs && (
-								<div className="ss-details-dirs">
-									{DIRECTIONS.slice(0, Math.min(4, detail.patternX)).map((label, i) => (
+								<div className="ss-details-actions">
+									<button
+										className="ss-btn ss-btn-primary"
+										onClick={() => void doExport(detail.id, 'image')}
+										title="Export PNG…"
+									>
+										<FileImage size={14} />
+										Export PNG…
+									</button>
+									<button
+										className="ss-btn ss-btn-primary"
+										onClick={() => void doExport(detail.id, 'sheet')}
+										title="Export spritesheet…"
+									>
+										<Grid3X3 size={14} />
+										Export spritesheet…
+									</button>
+									{selectedIds.size > 1 && (
 										<button
-											key={label}
-											className={`ss-dir-btn ${dir === i ? 'ss-dir-btn-active' : ''}`}
-											onClick={() => setDir(i)}
+											className="ss-btn ss-btn-primary"
+											onClick={() => void exportCombinedSheet()}
+											title={`Export ${selectedIds.size} selected as one combined spritesheet…`}
 										>
-											{label[0]}
+											<Grid3X3 size={14} />
+											Export {selectedIds.size} as combined spritesheet…
 										</button>
-									))}
+									)}
 								</div>
-							)}
-							{detail.name && <div className="ss-details-name">“{detail.name}”</div>}
-							<dl className="ss-details-stats">
-								<dt>Size</dt>
-								<dd>
-									{detail.width}×{detail.height} tiles
-								</dd>
-								<dt>Layers</dt>
-								<dd>{detail.layers}</dd>
-								<dt>Patterns</dt>
-								<dd>
-									{detail.patternX}×{detail.patternY}×{detail.patternZ}
-								</dd>
-								<dt>Frames</dt>
-								<dd>{detail.frames}</dd>
-								<dt>Sprites</dt>
-								<dd>{detail.spriteIndex.length}</dd>
-							</dl>
-							{detail.props.length > 0 && (
-								<>
-									<div className="ss-details-section">Properties</div>
-									<dl className="ss-details-stats">
-										{detail.props.map((p, i) => (
-											<div key={i} className="ss-details-prop">
-												<dt>{p.name}</dt>
-												<dd>{p.value ?? '✓'}</dd>
-											</div>
+							</div>
+							<div className="ss-details-scroll">
+								{isPlaying && (
+									<div className="ss-details-anim">
+										frame {frame + 1}/{detail.frames}
+									</div>
+								)}
+								{showDirs && (
+									<div className="ss-details-dirs">
+										{DIRECTIONS.slice(0, Math.min(4, detail.patternX)).map((label, i) => (
+											<button
+												key={label}
+												className={`ss-dir-btn ${dir === i ? 'ss-dir-btn-active' : ''}`}
+												onClick={() => setDir(i)}
+											>
+												{label[0]}
+											</button>
 										))}
-									</dl>
-								</>
-							)}
-							<div className="ss-details-section">Sprite IDs</div>
-							<div className="ss-details-sprites mono">
-								{detail.spriteIndex.slice(0, 120).join(', ')}
-								{detail.spriteIndex.length > 120 && ` … +${detail.spriteIndex.length - 120} more`}
+									</div>
+								)}
+								{detail.name && <div className="ss-details-name">“{detail.name}”</div>}
+								<dl className="ss-details-stats">
+									<dt>Size</dt>
+									<dd>
+										{detail.width}×{detail.height} tiles
+									</dd>
+									<dt>Layers</dt>
+									<dd>{detail.layers}</dd>
+									<dt>Patterns</dt>
+									<dd>
+										{detail.patternX}×{detail.patternY}×{detail.patternZ}
+									</dd>
+									<dt>Frames</dt>
+									<dd>{detail.frames}</dd>
+									<dt>Sprites</dt>
+									<dd>{detail.spriteIndex.length}</dd>
+								</dl>
+								{detail.props.length > 0 && (
+									<>
+										<div className="ss-details-section">Properties</div>
+										<dl className="ss-details-stats">
+											{detail.props.map((p, i) => (
+												<div key={i} className="ss-details-prop">
+													<dt>{p.name}</dt>
+													<dd>{p.value ?? '✓'}</dd>
+												</div>
+											))}
+										</dl>
+									</>
+								)}
+								<div className="ss-details-section">Sprite IDs</div>
+								<div className="ss-details-sprites mono">
+									{detail.spriteIndex.slice(0, 120).join(', ')}
+									{detail.spriteIndex.length > 120 && ` … +${detail.spriteIndex.length - 120} more`}
+								</div>
 							</div>
-							<div className="ss-details-actions">
-								<button className="ss-btn" onClick={() => void doExport(detail.id, 'image')}>
-									<FileImage size={14} />
-									Export PNG…
-								</button>
-								<button className="ss-btn ss-btn-primary" onClick={() => void doExport(detail.id, 'sheet')}>
-									<Grid3X3 size={14} />
-									Export spritesheet…
-								</button>
-							</div>
-						</div>
+						</>
 					) : (
 						<div className="ss-details-empty">Select a {category} to inspect it</div>
 					)}

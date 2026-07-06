@@ -173,7 +173,8 @@ export function thingUrl(
 	transparent: boolean,
 	frame?: number,
 	dir?: number,
-	diry?: number
+	diry?: number,
+	patz?: number
 ): string {
 	const q = new URLSearchParams({
 		path: spr.path,
@@ -186,6 +187,7 @@ export function thingUrl(
 	if (frame !== undefined) q.set('frame', String(frame));
 	if (dir !== undefined) q.set('dir', String(dir));
 	if (diry !== undefined) q.set('diry', String(diry));
+	if (patz !== undefined) q.set('patz', String(patz));
 	return `${protocolBase}/thing.png?${q.toString()}`;
 }
 

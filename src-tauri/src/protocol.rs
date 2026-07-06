@@ -4,8 +4,9 @@
 //   /atlas.png?path=<spr>&ids=1,5,9&cols=<n>&transparent=0|1
 //   /flags.bin?path=<spr>   -> one byte per sprite id, 1 = has pixels
 //   /thing.png?path=<spr>&dat=<dat>&cat=item|outfit|effect|missile&id=<n>&transparent=0|1
-//              [&frame=<n>][&dir=<n>][&diry=<n>]  (dir = pattern_x index, e.g. outfit
-//              facing; diry = pattern_y index, e.g. missile travel direction)
+//              [&frame=<n>][&dir=<n>][&diry=<n>][&patz=<n>]  (dir = pattern_x index,
+//              e.g. outfit facing; diry = pattern_y index, e.g. missile travel
+//              direction; patz = pattern_z index)
 //   /things.png?path=<spr>&dat=<dat>&cat=<cat>&ids=1,2,3&cell=<px>&transparent=0|1
 //              [&frame=<n>][&anim=0|1]
 //              -> horizontal strip, one cell×cell square per id (grid row atlas)
@@ -124,10 +125,11 @@ fn dispatch(
                 .thing(cat, id)
                 .ok_or_else(|| format!("unknown thing id {}", id))?;
 
-            let (def_frame, def_px, def_py, pz) = dat::preview_pattern(thing);
+            let (def_frame, def_px, def_py, def_pz) = dat::preview_pattern(thing);
             let frame = num::<u32>(query, "frame", def_frame) % thing.frames.max(1) as u32;
             let px = num::<u32>(query, "dir", def_px) % thing.pattern_x.max(1) as u32;
             let py = num::<u32>(query, "diry", def_py) % thing.pattern_y.max(1) as u32;
+            let pz = num::<u32>(query, "patz", def_pz) % thing.pattern_z.max(1) as u32;
 
             let spr_manager = spr.read().map_err(|e| format!("lock: {e}"))?;
             let render = dat::compose_thing_cell(
