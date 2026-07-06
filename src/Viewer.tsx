@@ -1,8 +1,10 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { save as saveDialog } from '@tauri-apps/plugin-dialog';
+import { join } from '@tauri-apps/api/path';
 import { Copy, FileImage, Grid3X3, Loader2, Search, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { atlasUrl, exportSprites, fetchFlags, OpenFile, parseSearch } from './spr';
 import type { Toast } from './App';
+import type { ExportSettings } from './settings';
 
 const ZOOM_LEVELS = [32, 48, 64, 96];
 const GRID_PAD = 8;
@@ -14,6 +16,7 @@ interface Props {
 	file: OpenFile;
 	transparent: boolean;
 	onTransparentChange: (transparent: boolean) => void;
+	exportSettings: ExportSettings;
 	showToast: (kind: Toast['kind'], msg: string) => void;
 }
 
@@ -99,7 +102,7 @@ function binarySearch(arr: number[], value: number): number {
 	return -1;
 }
 
-export default function Viewer({ file, transparent, onTransparentChange, showToast }: Props) {
+export default function Viewer({ file, transparent, onTransparentChange, exportSettings, showToast }: Props) {
 	const [flags, setFlags] = useState<Uint8Array | null>(null);
 	const [flagsError, setFlagsError] = useState<string | null>(null);
 	const [category, setCategory] = useState<Category>('all');
@@ -260,21 +263,29 @@ export default function Viewer({ file, transparent, onTransparentChange, showToa
 		showToast('ok', selectedSorted.length === 1 ? `Copied ID ${text}` : `Copied ${selectedSorted.length} IDs`);
 	}, [selectedSorted, showToast]);
 
+	const fixedFolder = exportSettings.useFixedFolder && exportSettings.fixedFolder ? exportSettings.fixedFolder : null;
+
 	const exportSingle = useCallback(
 		async (id: number) => {
-			const out = await saveDialog({
-				defaultPath: `sprite_${id}.png`,
-				filters: [{ name: 'PNG image', extensions: ['png'] }]
-			});
+			const filename = `sprite_${id}.png`;
+			let out: string | null;
+			if (fixedFolder) {
+				out = await join(fixedFolder, filename);
+			} else {
+				out = await saveDialog({
+					defaultPath: filename,
+					filters: [{ name: 'PNG image', extensions: ['png'] }]
+				});
+			}
 			if (!out) return;
 			try {
-				await exportSprites(file.path, [id], 1, transparent, out);
+				await exportSprites(file.path, [id], 1, transparent, out, !!fixedFolder);
 				showToast('ok', `Exported sprite ${id}`);
 			} catch (e) {
 				showToast('error', String(e));
 			}
 		},
-		[file.path, transparent, showToast]
+		[file.path, transparent, fixedFolder, showToast]
 	);
 
 	const openSheetModal = useCallback((ids: number[], label: string) => {
@@ -285,14 +296,20 @@ export default function Viewer({ file, transparent, onTransparentChange, showToa
 	const confirmSheetExport = useCallback(async () => {
 		if (!exportState) return;
 		const cols = Math.max(1, Math.min(256, parseInt(exportState.cols, 10) || 1));
-		const out = await saveDialog({
-			defaultPath: 'spritesheet.png',
-			filters: [{ name: 'PNG image', extensions: ['png'] }]
-		});
+		const filename = 'spritesheet.png';
+		let out: string | null;
+		if (fixedFolder) {
+			out = await join(fixedFolder, filename);
+		} else {
+			out = await saveDialog({
+				defaultPath: filename,
+				filters: [{ name: 'PNG image', extensions: ['png'] }]
+			});
+		}
 		if (!out) return;
 		setExporting(true);
 		try {
-			await exportSprites(file.path, exportState.ids, cols, transparent, out);
+			await exportSprites(file.path, exportState.ids, cols, transparent, out, !!fixedFolder);
 			showToast('ok', `Exported spritesheet (${exportState.ids.length} sprites)`);
 			setExportState(null);
 		} catch (e) {
@@ -300,7 +317,7 @@ export default function Viewer({ file, transparent, onTransparentChange, showToa
 		} finally {
 			setExporting(false);
 		}
-	}, [exportState, file.path, transparent, showToast]);
+	}, [exportState, file.path, transparent, fixedFolder, showToast]);
 
 	if (flagsError) {
 		return (

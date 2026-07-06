@@ -285,6 +285,7 @@ export default function App() {
 								onTransparentChange={transparent =>
 									setFiles(f => (f ? { ...f, transparent } : f))
 								}
+								exportSettings={exportSettings}
 								showToast={showToast}
 							/>
 						) : files.dat ? (

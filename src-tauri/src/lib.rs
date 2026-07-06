@@ -71,6 +71,34 @@ struct ExportThingsResult {
     failed: Vec<u32>,
 }
 
+/// If `path` already exists, appends " (2)", " (3)", … before the extension
+/// until a free path is found. Used when auto-exporting to a fixed folder,
+/// where there's no save dialog to warn about (or let the user avoid) an overwrite.
+fn unique_output_path(path: PathBuf) -> PathBuf {
+    if !path.exists() {
+        return path;
+    }
+    let stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("export")
+        .to_string();
+    let ext = path.extension().and_then(|s| s.to_str()).map(str::to_string);
+    let dir = path.parent().map(PathBuf::from).unwrap_or_default();
+    let mut n = 2u32;
+    loop {
+        let name = match &ext {
+            Some(ext) => format!("{stem} ({n}).{ext}"),
+            None => format!("{stem} ({n})"),
+        };
+        let candidate = dir.join(name);
+        if !candidate.exists() {
+            return candidate;
+        }
+        n += 1;
+    }
+}
+
 #[tauri::command]
 fn get_things(
     state: State<DatManagerState>,
@@ -129,7 +157,8 @@ fn export_thing(
     mode: String,
     transparent: bool,
     out_path: String,
-) -> Result<(), String> {
+    unique: Option<bool>,
+) -> Result<String, String> {
     let cat =
         Category::parse(&category).ok_or_else(|| format!("invalid category: {}", category))?;
     let dat_manager = dat_state.read().map_err(|e| format!("lock: {e}"))?;
@@ -157,7 +186,14 @@ fn export_thing(
         }
     };
     let png = dat::encode_png(&render)?;
-    std::fs::write(&out_path, png).map_err(|e| format!("Failed to write {}: {}", out_path, e))
+    let path = if unique.unwrap_or(false) {
+        unique_output_path(PathBuf::from(&out_path))
+    } else {
+        PathBuf::from(&out_path)
+    };
+    std::fs::write(&path, png)
+        .map_err(|e| format!("Failed to write {}: {}", path.display(), e))?;
+    Ok(path.display().to_string())
 }
 
 /// Exports several things as individual PNG files in one backend call.
@@ -173,6 +209,7 @@ fn export_things(
     mode: String,
     transparent: bool,
     out_dir: String,
+    unique: Option<bool>,
 ) -> Result<ExportThingsResult, String> {
     use rayon::prelude::*;
 
@@ -217,6 +254,11 @@ fn export_things(
                 };
                 let png = dat::encode_png(&render)?;
                 let out_path = out_dir.join(format!("{}_{}_{}.png", category, id, suffix));
+                let out_path = if unique.unwrap_or(false) {
+                    unique_output_path(out_path)
+                } else {
+                    out_path
+                };
                 std::fs::write(&out_path, png)
                     .map_err(|e| format!("Failed to write {}: {}", out_path.display(), e))
             })();
@@ -251,7 +293,8 @@ fn export_things_sheet(
     spacing: usize,
     align: String,
     out_path: String,
-) -> Result<(), String> {
+    unique: Option<bool>,
+) -> Result<String, String> {
     let cat =
         Category::parse(&category).ok_or_else(|| format!("invalid category: {}", category))?;
     let dat_manager = dat_state.read().map_err(|e| format!("lock: {e}"))?;
@@ -272,7 +315,14 @@ fn export_things_sheet(
     let spr_manager = spr_state.read().map_err(|e| format!("lock: {e}"))?;
     let render = dat::compose_things_sheet(&spr_manager, &spr_path, &things, transparent, &layout)?;
     let png = dat::encode_png(&render)?;
-    std::fs::write(&out_path, png).map_err(|e| format!("Failed to write {}: {}", out_path, e))
+    let path = if unique.unwrap_or(false) {
+        unique_output_path(PathBuf::from(&out_path))
+    } else {
+        PathBuf::from(&out_path)
+    };
+    std::fs::write(&path, png)
+        .map_err(|e| format!("Failed to write {}: {}", path.display(), e))?;
+    Ok(path.display().to_string())
 }
 
 #[tauri::command]
@@ -283,7 +333,8 @@ fn export_sprites(
     cols: u32,
     transparent: bool,
     out_path: String,
-) -> Result<(), String> {
+    unique: Option<bool>,
+) -> Result<String, String> {
     if ids.is_empty() {
         return Err("Nothing to export".to_string());
     }
@@ -291,7 +342,14 @@ fn export_sprites(
         let manager = state.read().map_err(|e| format!("lock: {e}"))?;
         manager.compose_atlas_png(&path, &ids, cols, transparent)?
     };
-    std::fs::write(&out_path, png).map_err(|e| format!("Failed to write {}: {}", out_path, e))
+    let out_path = if unique.unwrap_or(false) {
+        unique_output_path(PathBuf::from(&out_path))
+    } else {
+        PathBuf::from(&out_path)
+    };
+    std::fs::write(&out_path, png)
+        .map_err(|e| format!("Failed to write {}: {}", out_path.display(), e))?;
+    Ok(out_path.display().to_string())
 }
 
 #[derive(Serialize)]

@@ -101,6 +101,8 @@ export async function getThing(path: string, category: ThingCategory, id: number
 	return invoke<ThingDetail>('get_thing', { path, category, id });
 }
 
+/** Exports a thing as PNG. When `unique` is set, the backend appends " (2)", " (3)", …
+ *  to `outPath` if a file already exists there, and returns the path actually written. */
 export async function exportThing(
 	sprPath: string,
 	datPath: string,
@@ -108,9 +110,10 @@ export async function exportThing(
 	id: number,
 	mode: 'image' | 'sheet',
 	transparent: boolean,
-	outPath: string
-): Promise<void> {
-	await invoke('export_thing', { sprPath, datPath, category, id, mode, transparent, outPath });
+	outPath: string,
+	unique?: boolean
+): Promise<string> {
+	return invoke<string>('export_thing', { sprPath, datPath, category, id, mode, transparent, outPath, unique });
 }
 
 export interface ExportThingsResult {
@@ -125,9 +128,19 @@ export async function exportThings(
 	ids: number[],
 	mode: 'image' | 'sheet',
 	transparent: boolean,
-	outDir: string
+	outDir: string,
+	unique?: boolean
 ): Promise<ExportThingsResult> {
-	return invoke<ExportThingsResult>('export_things', { sprPath, datPath, category, ids, mode, transparent, outDir });
+	return invoke<ExportThingsResult>('export_things', {
+		sprPath,
+		datPath,
+		category,
+		ids,
+		mode,
+		transparent,
+		outDir,
+		unique
+	});
 }
 
 export type SheetAlign = 'start' | 'center' | 'end';
@@ -150,9 +163,10 @@ export async function exportThingsSheet(
 	ids: number[],
 	transparent: boolean,
 	layout: CombinedSheetLayout,
-	outPath: string
-): Promise<void> {
-	await invoke('export_things_sheet', {
+	outPath: string,
+	unique?: boolean
+): Promise<string> {
+	return invoke<string>('export_things_sheet', {
 		sprPath,
 		datPath,
 		category,
@@ -161,7 +175,8 @@ export async function exportThingsSheet(
 		columns: layout.columns,
 		spacing: layout.spacing,
 		align: layout.align,
-		outPath
+		outPath,
+		unique
 	});
 }
 
@@ -221,9 +236,10 @@ export async function exportSprites(
 	ids: number[],
 	cols: number,
 	transparent: boolean,
-	outPath: string
-): Promise<void> {
-	await invoke('export_sprites', { path, ids, cols, transparent, outPath });
+	outPath: string,
+	unique?: boolean
+): Promise<string> {
+	return invoke<string>('export_sprites', { path, ids, cols, transparent, outPath, unique });
 }
 
 export async function fetchFlags(file: OpenFile): Promise<Uint8Array> {

@@ -13,6 +13,10 @@ export interface ExportSettings {
 	spacing: number;
 	/** How each sheet is aligned within its grid cell. */
 	align: SheetAlign;
+	/** When true, exports always go straight to `fixedFolder` — no save/folder dialog is shown. */
+	useFixedFolder: boolean;
+	/** Absolute folder path used when `useFixedFolder` is on. Empty until the user picks one. */
+	fixedFolder: string;
 }
 
 export const DEFAULT_EXPORT_SETTINGS: ExportSettings = {
@@ -20,7 +24,9 @@ export const DEFAULT_EXPORT_SETTINGS: ExportSettings = {
 	gridBy: 'cols',
 	gridCount: 8,
 	spacing: 0,
-	align: 'start'
+	align: 'start',
+	useFixedFolder: false,
+	fixedFolder: ''
 };
 
 const EXPORT_KEY = 'sprx.exportSettings';
@@ -42,7 +48,10 @@ export function loadExportSettings(): ExportSettings {
 				typeof s.spacing === 'number' && s.spacing >= 0
 					? Math.min(256, Math.floor(s.spacing))
 					: DEFAULT_EXPORT_SETTINGS.spacing,
-			align: s.align ?? DEFAULT_EXPORT_SETTINGS.align
+			align: s.align ?? DEFAULT_EXPORT_SETTINGS.align,
+			useFixedFolder:
+				typeof s.useFixedFolder === 'boolean' ? s.useFixedFolder : DEFAULT_EXPORT_SETTINGS.useFixedFolder,
+			fixedFolder: typeof s.fixedFolder === 'string' ? s.fixedFolder : DEFAULT_EXPORT_SETTINGS.fixedFolder
 		};
 	} catch {
 		return { ...DEFAULT_EXPORT_SETTINGS };

@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
+import { join } from '@tauri-apps/api/path';
 import { Copy, FileImage, Filter, Grid3X3, Loader2, Pause, Play, Search, X, ZoomIn, ZoomOut } from 'lucide-react';
 import {
 	CombinedSheetLayout,
@@ -899,22 +900,30 @@ export default function ThingsView({
 		};
 	}, []);
 
+	const fixedFolder = exportSettings.useFixedFolder && exportSettings.fixedFolder ? exportSettings.fixedFolder : null;
+
 	const doExport = useCallback(
 		async (id: number, mode: 'image' | 'sheet') => {
 			const suffix = mode === 'sheet' ? 'sheet' : 'image';
-			const out = await saveDialog({
-				defaultPath: `${category}_${id}_${suffix}.png`,
-				filters: [{ name: 'PNG image', extensions: ['png'] }]
-			});
+			const filename = `${category}_${id}_${suffix}.png`;
+			let out: string | null;
+			if (fixedFolder) {
+				out = await join(fixedFolder, filename);
+			} else {
+				out = await saveDialog({
+					defaultPath: filename,
+					filters: [{ name: 'PNG image', extensions: ['png'] }]
+				});
+			}
 			if (!out) return;
 			try {
-				await exportThing(spr.path, dat.path, category, id, mode, transparent, out);
+				await exportThing(spr.path, dat.path, category, id, mode, transparent, out, !!fixedFolder);
 				showToast('ok', `Exported ${category} ${id} (${mode === 'sheet' ? 'spritesheet' : 'image'})`);
 			} catch (e) {
 				showToast('error', String(e));
 			}
 		},
-		[spr.path, dat.path, category, transparent, showToast]
+		[spr.path, dat.path, category, transparent, fixedFolder, showToast]
 	);
 
 	// Exports every selected thing into a chosen folder, one PNG per id.
@@ -926,10 +935,19 @@ export default function ThingsView({
 				await doExport(ids[0], mode);
 				return;
 			}
-			const dir = await openDialog({ directory: true, title: `Choose a folder for ${ids.length} PNGs` });
+			const dir = fixedFolder ?? (await openDialog({ directory: true, title: `Choose a folder for ${ids.length} PNGs` }));
 			if (!dir || typeof dir !== 'string') return;
 			try {
-				const { exported, failed } = await exportThings(spr.path, dat.path, category, ids, mode, transparent, dir);
+				const { exported, failed } = await exportThings(
+					spr.path,
+					dat.path,
+					category,
+					ids,
+					mode,
+					transparent,
+					dir,
+					!!fixedFolder
+				);
 				if (failed.length === 0) {
 					showToast('ok', `Exported ${exported} ${category}${exported !== 1 ? 's' : ''} to ${dir}`);
 				} else {
@@ -942,7 +960,7 @@ export default function ThingsView({
 				showToast('error', String(e));
 			}
 		},
-		[doExport, spr.path, dat.path, category, transparent, showToast]
+		[doExport, spr.path, dat.path, category, transparent, fixedFolder, showToast]
 	);
 
 	// Exports the selected things into a single combined spritesheet PNG using
@@ -955,18 +973,24 @@ export default function ThingsView({
 			spacing: exportSettings.spacing,
 			align: exportSettings.align
 		};
-		const out = await saveDialog({
-			defaultPath: `${category}_${ids.length}_sheet.png`,
-			filters: [{ name: 'PNG image', extensions: ['png'] }]
-		});
+		const filename = `${category}_${ids.length}_sheet.png`;
+		let out: string | null;
+		if (fixedFolder) {
+			out = await join(fixedFolder, filename);
+		} else {
+			out = await saveDialog({
+				defaultPath: filename,
+				filters: [{ name: 'PNG image', extensions: ['png'] }]
+			});
+		}
 		if (!out) return;
 		try {
-			await exportThingsSheet(spr.path, dat.path, category, ids, transparent, layout, out);
+			await exportThingsSheet(spr.path, dat.path, category, ids, transparent, layout, out, !!fixedFolder);
 			showToast('ok', `Exported ${ids.length} ${category}s to a combined spritesheet`);
 		} catch (e) {
 			showToast('error', String(e));
 		}
-	}, [exportSettings, spr.path, dat.path, category, transparent, showToast]);
+	}, [exportSettings, spr.path, dat.path, category, transparent, fixedFolder, showToast]);
 
 	if (loadError) {
 		return (
