@@ -473,6 +473,7 @@ export default function ThingsView({
 	// structural filter keys; a thing must satisfy every active filter (AND).
 	const [activeFilters, setActiveFilters] = useState<Set<string>>(new Set());
 	const [showFilters, setShowFilters] = useState(false);
+	const [filterSearch, setFilterSearch] = useState('');
 
 	// Multi-selection. `selectedIds` is the full set; `anchorId` is the pivot
 	// for shift-range selection; `selectedId` (from props) stays the primary
@@ -488,6 +489,7 @@ export default function ThingsView({
 		setAnchorId(null);
 		setActiveFilters(new Set());
 		setShowFilters(false);
+		setFilterSearch('');
 	}, [category]);
 
 	const scrollRef = useRef<HTMLDivElement>(null);
@@ -587,6 +589,16 @@ export default function ThingsView({
 		for (const t of things ?? []) for (const p of t.propNames) set.add(p);
 		return [...set].sort((a, b) => a.localeCompare(b));
 	}, [things]);
+
+	// Narrows the Structure/Properties lists shown in the filter popover; distinct
+	// from `matchFn`/`filterFn`, which narrow the grid itself.
+	const filterListQuery = filterSearch.trim().toLowerCase();
+	const visibleStructuralFilters = filterListQuery
+		? STRUCTURAL_FILTERS.filter(f => f.label.toLowerCase().includes(filterListQuery))
+		: STRUCTURAL_FILTERS;
+	const visibleProps = filterListQuery
+		? availableProps.filter(name => name.toLowerCase().includes(filterListQuery))
+		: availableProps;
 
 	// A thing passes if it satisfies every active filter (structural + property).
 	const filterFn = useMemo(() => {
@@ -1029,24 +1041,46 @@ export default function ThingsView({
 									</button>
 								)}
 							</div>
-							<div className="ss-filter-section">Structure</div>
-							<div className="ss-filter-list">
-								{STRUCTURAL_FILTERS.map(f => (
-									<label key={f.key} className="ss-filter-item">
-										<input
-											type="checkbox"
-											checked={activeFilters.has(f.key)}
-											onChange={() => toggleFilter(f.key)}
-										/>
-										{f.label}
-									</label>
-								))}
+							<div className="ss-filter-search">
+								<Search size={13} />
+								<input
+									placeholder="Search filters"
+									value={filterSearch}
+									onChange={e => setFilterSearch(e.target.value)}
+									spellCheck={false}
+								/>
+								{filterSearch && (
+									<button
+										className="ss-search-clear"
+										onClick={() => setFilterSearch('')}
+										aria-label="Clear filter search"
+									>
+										<X size={12} />
+									</button>
+								)}
 							</div>
-							{availableProps.length > 0 && (
+							{visibleStructuralFilters.length > 0 && (
+								<>
+									<div className="ss-filter-section">Structure</div>
+									<div className="ss-filter-list">
+										{visibleStructuralFilters.map(f => (
+											<label key={f.key} className="ss-filter-item">
+												<input
+													type="checkbox"
+													checked={activeFilters.has(f.key)}
+													onChange={() => toggleFilter(f.key)}
+												/>
+												{f.label}
+											</label>
+										))}
+									</div>
+								</>
+							)}
+							{visibleProps.length > 0 && (
 								<>
 									<div className="ss-filter-section">Properties</div>
 									<div className="ss-filter-list ss-filter-props">
-										{availableProps.map(name => (
+										{visibleProps.map(name => (
 											<label key={name} className="ss-filter-item">
 												<input
 													type="checkbox"
@@ -1058,6 +1092,9 @@ export default function ThingsView({
 										))}
 									</div>
 								</>
+							)}
+							{visibleStructuralFilters.length === 0 && visibleProps.length === 0 && (
+								<div className="ss-filter-empty">No matching filters</div>
 							)}
 						</div>
 					)}
