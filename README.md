@@ -8,6 +8,20 @@ Uses SpriteForge `.spr`/`.dat` reading code (`spr_manager.rs` / `dat_reader.rs` 
 
 Thanks https://github.com/Frenvius
 
+## Prerequisites
+
+Install [Bun](https://bun.sh):
+
+```sh
+curl -fsSL https://bun.sh/install | bash
+```
+
+On Windows (PowerShell):
+
+```sh
+powershell -c "irm bun.sh/install.ps1 | iex"
+```
+
 ## Development
 
 ```sh
