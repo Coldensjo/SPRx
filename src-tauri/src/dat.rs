@@ -676,7 +676,8 @@ impl<'a> DatReader<'a> {
             let layers = self.read_u8()?;
             let pattern_x = self.read_u8()?;
             let pattern_y = self.read_u8()?;
-            let pattern_z = self.read_u8()?;
+            // Dat versions <= 750 (pre-floor-pattern) don't encode a Z pattern byte.
+            let pattern_z = if self.version > 750 { self.read_u8()? } else { 1 };
             let frames = self.read_u8()?;
 
             if frames > 1 && self.frame_durations {
@@ -696,7 +697,9 @@ impl<'a> DatReader<'a> {
                 * pattern_y as u32
                 * pattern_z as u32
                 * frames as u32;
-            if total == 0 || total > 4096 {
+            // A zero-size group (e.g. a deprecated/gap item id) is a legitimate
+            // empty entry, not a version-detection mismatch.
+            if total > 4096 {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     format!("Frame group has {} sprites (out of range)", total),
