@@ -9,7 +9,7 @@ const dest = join(releaseDir, 'sprx-portable.exe');
 
 if (!existsSync(src)) {
 	console.error(`Release binary not found: ${src}`);
-	console.error('Run "npm run tauri:build:portable" or "npm run tauri:build:all" first.');
+	console.error('Run "bun run tauri:build:portable" or "bun run tauri:build:all" first.');
 	process.exit(1);
 }
 

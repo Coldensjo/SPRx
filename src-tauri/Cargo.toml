@@ -1,6 +1,6 @@
 [package]
 name = "sprx"
-version = "0.3.0"
+version = "0.4.0"
 description = "SPRx — fast Tibia .spr viewer and spritesheet exporter"
 authors = ["Frenvius <frenvius@gmail.com>"]
 edition = "2021"

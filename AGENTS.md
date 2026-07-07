@@ -11,21 +11,21 @@ Thanks https://github.com/Frenvius
 ## Development
 
 ```sh
-npm install
-npm run tauri:dev
+bun install
+bun run tauri:dev
 ```
 
 ## Build
 
 ```sh
 # Portable .exe only (no installer)
-npm run tauri:build:portable
+bun run tauri:build:portable
 
 # NSIS installer + portable .exe
-npm run tauri:build:all
+bun run tauri:build:all
 
 # NSIS installer only
-npm run tauri:build
+bun run tauri:build
 ```
 
 Outputs:
