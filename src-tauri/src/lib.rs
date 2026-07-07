@@ -196,6 +196,56 @@ fn export_thing(
     Ok(path.display().to_string())
 }
 
+/// Exports a thing's animation as a looping GIF at a fixed direction/pattern.
+/// `dir` selects the outfit direction (0=N, 1=E, 2=S, 3=W); ignored for
+/// things without directional patterns.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+fn export_thing_gif(
+    spr_state: State<SprManagerState>,
+    dat_state: State<DatManagerState>,
+    spr_path: String,
+    dat_path: String,
+    category: String,
+    id: u32,
+    dir: Option<u32>,
+    skip_first_frame: Option<bool>,
+    transparent: bool,
+    out_path: String,
+    unique: Option<bool>,
+) -> Result<String, String> {
+    let cat =
+        Category::parse(&category).ok_or_else(|| format!("invalid category: {}", category))?;
+    let dat_manager = dat_state.read().map_err(|e| format!("lock: {e}"))?;
+    let file = dat_manager.file(&dat_path)?;
+    let thing = file
+        .thing(cat, id)
+        .ok_or_else(|| format!("unknown {} id {}", category, id))?;
+
+    let spr_manager = spr_state.read().map_err(|e| format!("lock: {e}"))?;
+    let px = (dir.unwrap_or(0) as u8).min(thing.pattern_x.saturating_sub(1)) as u32;
+    let gif = dat::compose_thing_gif(
+        &spr_manager,
+        &spr_path,
+        thing,
+        px,
+        0,
+        0,
+        transparent,
+        220,
+        skip_first_frame.unwrap_or(false),
+    )?;
+
+    let path = if unique.unwrap_or(false) {
+        unique_output_path(PathBuf::from(&out_path))
+    } else {
+        PathBuf::from(&out_path)
+    };
+    std::fs::write(&path, gif)
+        .map_err(|e| format!("Failed to write {}: {}", path.display(), e))?;
+    Ok(path.display().to_string())
+}
+
 /// Exports several things as individual PNG files in one backend call.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
@@ -603,6 +653,7 @@ pub fn run() {
             get_things,
             get_thing,
             export_thing,
+            export_thing_gif,
             export_things,
             export_things_sheet,
             export_sprites,

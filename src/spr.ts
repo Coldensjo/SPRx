@@ -116,6 +116,33 @@ export async function exportThing(
 	return invoke<string>('export_thing', { sprPath, datPath, category, id, mode, transparent, outPath, unique });
 }
 
+/** Exports a thing's animation as a looping GIF. `dir` selects the outfit
+ *  direction (0=N, 1=E, 2=S, 3=W); ignored for things without directions.
+ *  `skipFirstFrame` leaves out frame 0 (an outfit's standing pose). */
+export async function exportThingGif(
+	sprPath: string,
+	datPath: string,
+	category: ThingCategory,
+	id: number,
+	dir: number | undefined,
+	skipFirstFrame: boolean,
+	transparent: boolean,
+	outPath: string,
+	unique?: boolean
+): Promise<string> {
+	return invoke<string>('export_thing_gif', {
+		sprPath,
+		datPath,
+		category,
+		id,
+		dir,
+		skipFirstFrame,
+		transparent,
+		outPath,
+		unique
+	});
+}
+
 export interface ExportThingsResult {
 	exported: number;
 	failed: number[];

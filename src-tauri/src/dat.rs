@@ -1581,6 +1581,71 @@ pub fn compose_things_sheet(
     })
 }
 
+/// Composes every animation frame at a fixed direction/pattern into an
+/// animated GIF. `px` selects the outfit direction (0=N, 1=E, 2=S, 3=W);
+/// callers pass 0 for things without directional patterns. When
+/// `skip_first_frame` is set, frame 0 (the outfit's standing pose) is left
+/// out so the GIF loops over just the walking frames.
+pub fn compose_thing_gif(
+    spr: &SprManager,
+    spr_path: &str,
+    t: &Thing,
+    px: u32,
+    py: u32,
+    pz: u32,
+    transparent: bool,
+    delay_ms: u32,
+    skip_first_frame: bool,
+) -> Result<Vec<u8>, String> {
+    if t.frames <= 1 {
+        return Err("This item has no animation to export".to_string());
+    }
+    let start = if skip_first_frame { 1 } else { 0 };
+
+    let mut ids = Vec::new();
+    for frame in start..t.frames as u32 {
+        cell_sprite_ids(t, frame, px, py, pz, None, &mut ids);
+    }
+    let decoded = read_decoded(spr, spr_path, &ids, transparent)?;
+    let renders: Vec<ThingRender> = (start..t.frames as u32)
+        .map(|frame| compose_from_decoded(&decoded, t, frame, px, py, pz, None))
+        .collect();
+    encode_gif(&renders, delay_ms)
+}
+
+/// Encodes a sequence of same-sized RGBA renders as an animated, looping GIF.
+fn encode_gif(renders: &[ThingRender], delay_ms: u32) -> Result<Vec<u8>, String> {
+    use image::codecs::gif::{GifEncoder, Repeat};
+    use image::{Delay, Frame, RgbaImage};
+    use std::time::Duration;
+
+    let Some(first) = renders.first() else {
+        return Err("No frames to encode".to_string());
+    };
+    let (w, h) = (first.width_px, first.height_px);
+
+    let mut buf = Vec::new();
+    {
+        let mut encoder = GifEncoder::new(&mut buf);
+        encoder
+            .set_repeat(Repeat::Infinite)
+            .map_err(|e| format!("GIF encode failed: {e}"))?;
+        for r in renders {
+            if r.width_px != w || r.height_px != h {
+                return Err("Frame size mismatch while building GIF".to_string());
+            }
+            let img = RgbaImage::from_raw(w, h, r.rgba.clone())
+                .ok_or_else(|| "Failed to build GIF frame".to_string())?;
+            let delay = Delay::from_saturating_duration(Duration::from_millis(delay_ms as u64));
+            let frame = Frame::from_parts(img, 0, 0, delay);
+            encoder
+                .encode_frame(frame)
+                .map_err(|e| format!("GIF encode failed: {e}"))?;
+        }
+    }
+    Ok(buf)
+}
+
 pub fn encode_png(render: &ThingRender) -> Result<Vec<u8>, String> {
     use image::codecs::png::PngEncoder;
     use image::ImageEncoder;

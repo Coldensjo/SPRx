@@ -1146,6 +1146,14 @@ button {
 	flex-shrink: 0;
 }
 
+.ss-menu-checkbox {
+	cursor: default;
+}
+
+.ss-menu-checkbox input {
+	margin: 0;
+}
+
 .ss-menu-sep {
 	height: 1px;
 	background: var(--border);

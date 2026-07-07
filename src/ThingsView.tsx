@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { join } from '@tauri-apps/api/path';
-import { Copy, FileImage, Filter, Grid3X3, Loader2, Pause, Play, Search, X, ZoomIn, ZoomOut, Archive } from 'lucide-react';
+import { Copy, FileImage, Film, Filter, Grid3X3, Loader2, Pause, Play, Search, X, ZoomIn, ZoomOut, Archive } from 'lucide-react';
 import {
 	CombinedSheetLayout,
 	exportThing,
@@ -9,6 +9,7 @@ import {
 	exportThingsSheet,
 	exportThingsToZip,
 	exportCombinedSheetToZip,
+	exportThingGif,
 	getThing,
 	getThings,
 	OpenDat,
@@ -478,6 +479,7 @@ export default function ThingsView({
 	const [showFilters, setShowFilters] = useState(false);
 	const [filterSearch, setFilterSearch] = useState('');
 	const [showExportMenu, setShowExportMenu] = useState(false);
+	const [skipStandingFrame, setSkipStandingFrame] = useState(true);
 
 	// Multi-selection. `selectedIds` is the full set; `anchorId` is the pivot
 	// for shift-range selection; `selectedId` (from props) stays the primary
@@ -949,6 +951,30 @@ export default function ThingsView({
 		[spr.path, dat.path, category, transparent, fixedFolder, showToast]
 	);
 
+	// Exports one thing's animation as a looping GIF at a fixed direction.
+	const doExportGif = useCallback(
+		async (id: number, dir: number | undefined, skipFirstFrame: boolean) => {
+			const filename = `${category}_${id}.gif`;
+			let out: string | null;
+			if (fixedFolder) {
+				out = await join(fixedFolder, filename);
+			} else {
+				out = await saveDialog({
+					defaultPath: filename,
+					filters: [{ name: 'GIF image', extensions: ['gif'] }]
+				});
+			}
+			if (!out) return;
+			try {
+				await exportThingGif(spr.path, dat.path, category, id, dir, skipFirstFrame, transparent, out, !!fixedFolder);
+				showToast('ok', `Exported ${category} ${id} (GIF)`);
+			} catch (e) {
+				showToast('error', String(e));
+			}
+		},
+		[spr.path, dat.path, category, transparent, fixedFolder, showToast]
+	);
+
 	// Exports every selected thing into a chosen folder, one PNG per id.
 	const exportSelected = useCallback(
 		async (mode: 'image' | 'sheet') => {
@@ -1382,6 +1408,28 @@ export default function ThingsView({
 												<Grid3X3 size={14} />
 												{selectedIds.size > 1 ? `Export ${selectedIds.size} as spritesheets…` : 'Export as spritesheet…'}
 											</button>
+											{selectedIds.size <= 1 && detail.frames > 1 && (
+												<>
+													<label className="ss-menu-item ss-menu-checkbox" onClick={e => e.stopPropagation()}>
+														<input
+															type="checkbox"
+															checked={skipStandingFrame}
+															onChange={e => setSkipStandingFrame(e.target.checked)}
+														/>
+														Skip standing frame
+													</label>
+													<button
+														className="ss-menu-item"
+														onClick={() =>
+															(setShowExportMenu(false),
+															void doExportGif(detail.id, showDirs ? dir : undefined, skipStandingFrame))
+														}
+													>
+														<Film size={14} />
+														{showDirs ? `Export as GIF (${DIRECTIONS[dir]})…` : 'Export as GIF…'}
+													</button>
+												</>
+											)}
 											{selectedIds.size > 1 && (
 												<>
 													<button
