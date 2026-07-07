@@ -180,6 +180,54 @@ export async function exportThingsSheet(
 	});
 }
 
+/** Exports several things as individual PNGs into a zip archive. */
+export async function exportThingsToZip(
+	sprPath: string,
+	datPath: string,
+	category: ThingCategory,
+	ids: number[],
+	mode: 'image' | 'sheet',
+	transparent: boolean,
+	outPath: string,
+	unique?: boolean
+): Promise<string> {
+	return invoke<string>('export_things_to_zip', {
+		sprPath,
+		datPath,
+		category,
+		ids,
+		mode,
+		transparent,
+		outPath,
+		unique
+	});
+}
+
+/** Exports several things into one combined spritesheet PNG and saves it in a zip archive. */
+export async function exportCombinedSheetToZip(
+	sprPath: string,
+	datPath: string,
+	category: ThingCategory,
+	ids: number[],
+	transparent: boolean,
+	layout: CombinedSheetLayout,
+	outPath: string,
+	unique?: boolean
+): Promise<string> {
+	return invoke<string>('export_combined_sheet_to_zip', {
+		sprPath,
+		datPath,
+		category,
+		ids,
+		transparent,
+		columns: layout.columns,
+		spacing: layout.spacing,
+		align: layout.align,
+		outPath,
+		unique
+	});
+}
+
 export function thingUrl(
 	spr: OpenFile,
 	dat: OpenDat,

@@ -1,12 +1,14 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { join } from '@tauri-apps/api/path';
-import { Copy, FileImage, Filter, Grid3X3, Loader2, Pause, Play, Search, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { Copy, FileImage, Filter, Grid3X3, Loader2, Pause, Play, Search, X, ZoomIn, ZoomOut, Archive } from 'lucide-react';
 import {
 	CombinedSheetLayout,
 	exportThing,
 	exportThings,
 	exportThingsSheet,
+	exportThingsToZip,
+	exportCombinedSheetToZip,
 	getThing,
 	getThings,
 	OpenDat,
@@ -995,6 +997,83 @@ export default function ThingsView({
 		}
 	}, [exportSettings, spr.path, dat.path, category, transparent, fixedFolder, showToast]);
 
+	// Exports the selected things as PNGs into a zip archive.
+	const exportSelectedToZip = useCallback(
+		async (mode: 'image' | 'sheet') => {
+			const ids = [...selectedIdsRef.current].sort((a, b) => a - b);
+			if (ids.length === 0) return;
+			if (ids.length === 1) {
+				// For single item, still create a zip (contains one file)
+				const suffix = mode === 'sheet' ? 'sheet' : 'image';
+				const filename = `${category}_${ids[0]}_${suffix}.zip`;
+				let out: string | null;
+				if (fixedFolder) {
+					out = await join(fixedFolder, filename);
+				} else {
+					out = await saveDialog({
+						defaultPath: filename,
+						filters: [{ name: 'ZIP archive', extensions: ['zip'] }]
+					});
+				}
+				if (!out) return;
+				try {
+					await exportThingsToZip(spr.path, dat.path, category, ids, mode, transparent, out, !!fixedFolder);
+					showToast('ok', `Exported ${category} ${ids[0]} to zip`);
+				} catch (e) {
+					showToast('error', String(e));
+				}
+				return;
+			}
+			const suffix = mode === 'sheet' ? 'sheets' : 'images';
+			const filename = `${category}_${ids.length}_${suffix}.zip`;
+			let out: string | null;
+			if (fixedFolder) {
+				out = await join(fixedFolder, filename);
+			} else {
+				out = await saveDialog({
+					defaultPath: filename,
+					filters: [{ name: 'ZIP archive', extensions: ['zip'] }]
+				});
+			}
+			if (!out) return;
+			try {
+				await exportThingsToZip(spr.path, dat.path, category, ids, mode, transparent, out, !!fixedFolder);
+				showToast('ok', `Exported ${ids.length} ${category}${ids.length !== 1 ? 's' : ''} to zip`);
+			} catch (e) {
+				showToast('error', String(e));
+			}
+		},
+		[spr.path, dat.path, category, transparent, fixedFolder, showToast]
+	);
+
+	// Exports the selected things into a combined spritesheet and saves it in a zip.
+	const exportCombinedSheetToZipFn = useCallback(async () => {
+		const ids = [...selectedIdsRef.current].sort((a, b) => a - b);
+		if (ids.length === 0) return;
+		const layout: CombinedSheetLayout = {
+			columns: resolveColumns(exportSettings, ids.length),
+			spacing: exportSettings.spacing,
+			align: exportSettings.align
+		};
+		const filename = `${category}_${ids.length}_combined_sheet.zip`;
+		let out: string | null;
+		if (fixedFolder) {
+			out = await join(fixedFolder, filename);
+		} else {
+			out = await saveDialog({
+				defaultPath: filename,
+				filters: [{ name: 'ZIP archive', extensions: ['zip'] }]
+			});
+		}
+		if (!out) return;
+		try {
+			await exportCombinedSheetToZip(spr.path, dat.path, category, ids, transparent, layout, out, !!fixedFolder);
+			showToast('ok', `Exported ${ids.length} ${category}s to zip with combined spritesheet`);
+		} catch (e) {
+			showToast('error', String(e));
+		}
+	}, [exportSettings, spr.path, dat.path, category, transparent, fixedFolder, showToast]);
+
 	if (loadError) {
 		return (
 			<div className="ss-loading">
@@ -1278,14 +1357,40 @@ export default function ThingsView({
 										Export spritesheet…
 									</button>
 									{selectedIds.size > 1 && (
-										<button
-											className="ss-btn ss-btn-primary"
-											onClick={() => void exportCombinedSheet()}
-											title={`Export ${selectedIds.size} selected as one combined spritesheet…`}
-										>
-											<Grid3X3 size={14} />
-											Export {selectedIds.size} as combined spritesheet…
-										</button>
+										<>
+											<button
+												className="ss-btn ss-btn-primary"
+												onClick={() => void exportCombinedSheet()}
+												title={`Export ${selectedIds.size} selected as one combined spritesheet…`}
+											>
+												<Grid3X3 size={14} />
+												Export {selectedIds.size} as combined spritesheet…
+											</button>
+											<button
+												className="ss-btn"
+												onClick={() => void exportSelectedToZip('image')}
+												title={`Export ${selectedIds.size} selected as PNGs to zip…`}
+											>
+												<Archive size={14} />
+												Export {selectedIds.size} as PNGs to zip…
+											</button>
+											<button
+												className="ss-btn"
+												onClick={() => void exportSelectedToZip('sheet')}
+												title={`Export ${selectedIds.size} selected as spritesheets to zip…`}
+											>
+												<Archive size={14} />
+												Export {selectedIds.size} as sheets to zip…
+											</button>
+											<button
+												className="ss-btn"
+												onClick={() => void exportCombinedSheetToZipFn()}
+												title={`Export ${selectedIds.size} selected as combined spritesheet to zip…`}
+											>
+												<Archive size={14} />
+												Combined sheet to zip…
+											</button>
+										</>
 									)}
 								</div>
 							</div>
@@ -1394,6 +1499,19 @@ export default function ThingsView({
 							<button className="ss-menu-item" onClick={() => (setMenu(null), void exportCombinedSheet())}>
 								<Grid3X3 size={14} />
 								Export {selectedIds.size} selected as one combined spritesheet…
+							</button>
+							<div className="ss-menu-sep" />
+							<button className="ss-menu-item" onClick={() => (setMenu(null), void exportSelectedToZip('image'))}>
+								<Archive size={14} />
+								Export {selectedIds.size} selected as PNGs to zip…
+							</button>
+							<button className="ss-menu-item" onClick={() => (setMenu(null), void exportSelectedToZip('sheet'))}>
+								<Archive size={14} />
+								Export {selectedIds.size} selected as spritesheets to zip…
+							</button>
+							<button className="ss-menu-item" onClick={() => (setMenu(null), void exportCombinedSheetToZipFn())}>
+								<Archive size={14} />
+								Export {selectedIds.size} selected as combined spritesheet to zip…
 							</button>
 						</>
 					) : (

@@ -438,6 +438,153 @@ fn probe_pair(path: String) -> Result<FilePair, String> {
     })
 }
 
+/// Exports several things as individual PNG files into a zip archive.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+fn export_things_to_zip(
+    spr_state: State<SprManagerState>,
+    dat_state: State<DatManagerState>,
+    spr_path: String,
+    dat_path: String,
+    category: String,
+    ids: Vec<u32>,
+    mode: String,
+    transparent: bool,
+    out_path: String,
+    unique: Option<bool>,
+) -> Result<String, String> {
+    use std::io::Write;
+    use zip::ZipWriter;
+
+    if ids.is_empty() {
+        return Err("Nothing to export".to_string());
+    }
+
+    let cat =
+        Category::parse(&category).ok_or_else(|| format!("invalid category: {}", category))?;
+    let suffix = if mode == "sheet" { "sheet" } else { "image" };
+
+    let dat_manager = dat_state.read().map_err(|e| format!("lock: {e}"))?;
+    let file = dat_manager.file(&dat_path)?;
+    let spr_manager = spr_state.read().map_err(|e| format!("lock: {e}"))?;
+
+    // Create in-memory zip
+    let mut zip_buffer = Vec::new();
+    {
+        let mut cursor = std::io::Cursor::new(&mut zip_buffer);
+        let mut zip = ZipWriter::new(&mut cursor);
+        let options = zip::write::FileOptions::default();
+
+        for id in &ids {
+            let thing = file
+                .thing(cat, *id)
+                .ok_or_else(|| format!("unknown {} id {}", category, id))?;
+            let render = match mode.as_str() {
+                "sheet" => {
+                    dat::compose_thing_sheet(&spr_manager, &spr_path, thing, transparent)?
+                }
+                _ => {
+                    let (frame, px, py, pz) = dat::preview_pattern(thing);
+                    dat::compose_thing_cell(
+                        &spr_manager,
+                        &spr_path,
+                        thing,
+                        frame,
+                        px,
+                        py,
+                        pz,
+                        None,
+                        transparent,
+                    )?
+                }
+            };
+            let png = dat::encode_png(&render)?;
+            let filename = format!("{}_{:04}_{}.png", category, id, suffix);
+            zip.start_file(&filename, options)
+                .map_err(|e| format!("Failed to add file to zip: {}", e))?;
+            zip.write_all(&png)
+                .map_err(|e| format!("Failed to write to zip: {}", e))?;
+        }
+        zip.finish()
+            .map_err(|e| format!("Failed to finalize zip: {}", e))?;
+    }
+
+    let path = if unique.unwrap_or(false) {
+        unique_output_path(PathBuf::from(&out_path))
+    } else {
+        PathBuf::from(&out_path)
+    };
+    std::fs::write(&path, zip_buffer)
+        .map_err(|e| format!("Failed to write {}: {}", path.display(), e))?;
+    Ok(path.display().to_string())
+}
+
+/// Exports several things into one combined spritesheet PNG and saves it in a zip archive.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+fn export_combined_sheet_to_zip(
+    spr_state: State<SprManagerState>,
+    dat_state: State<DatManagerState>,
+    spr_path: String,
+    dat_path: String,
+    category: String,
+    ids: Vec<u32>,
+    transparent: bool,
+    columns: usize,
+    spacing: usize,
+    align: String,
+    out_path: String,
+    unique: Option<bool>,
+) -> Result<String, String> {
+    use std::io::Write;
+    use zip::ZipWriter;
+
+    let cat =
+        Category::parse(&category).ok_or_else(|| format!("invalid category: {}", category))?;
+    let dat_manager = dat_state.read().map_err(|e| format!("lock: {e}"))?;
+    let file = dat_manager.file(&dat_path)?;
+    let things: Vec<&dat::Thing> = ids
+        .iter()
+        .map(|&id| {
+            file.thing(cat, id)
+                .ok_or_else(|| format!("unknown {} id {}", category, id))
+        })
+        .collect::<Result<_, _>>()?;
+
+    let layout = dat::SheetLayout {
+        columns: columns.max(1),
+        spacing: spacing.min(256),
+        align: dat::Align::parse(&align),
+    };
+    let spr_manager = spr_state.read().map_err(|e| format!("lock: {e}"))?;
+    let render = dat::compose_things_sheet(&spr_manager, &spr_path, &things, transparent, &layout)?;
+    let png = dat::encode_png(&render)?;
+
+    // Create in-memory zip
+    let mut zip_buffer = Vec::new();
+    {
+        let mut cursor = std::io::Cursor::new(&mut zip_buffer);
+        let mut zip = ZipWriter::new(&mut cursor);
+        let options = zip::write::FileOptions::default();
+        let filename = format!("{}_{}_combined_sheet.png", category, ids.len());
+        zip.start_file(&filename, options)
+            .map_err(|e| format!("Failed to add file to zip: {}", e))?;
+        zip.write_all(&png)
+            .map_err(|e| format!("Failed to write to zip: {}", e))?;
+        zip.finish()
+            .map_err(|e| format!("Failed to finalize zip: {}", e))?;
+    }
+
+    let path = if unique.unwrap_or(false) {
+        unique_output_path(PathBuf::from(&out_path))
+    } else {
+        PathBuf::from(&out_path)
+    };
+    std::fs::write(&path, zip_buffer)
+        .map_err(|e| format!("Failed to write {}: {}", path.display(), e))?;
+    Ok(path.display().to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let spr_manager: SprManagerState = Arc::new(RwLock::new(SprManager::new()));
@@ -459,6 +606,8 @@ pub fn run() {
             export_things,
             export_things_sheet,
             export_sprites,
+            export_things_to_zip,
+            export_combined_sheet_to_zip,
             probe_pair
         ])
         .run(tauri::generate_context!())
