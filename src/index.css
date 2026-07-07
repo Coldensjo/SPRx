@@ -861,14 +861,26 @@ button {
 	user-select: text;
 }
 
-.ss-details-actions {
-	display: flex;
-	flex-direction: column;
-	gap: 6px;
+.ss-export-dropdown {
+	position: relative;
 }
 
-.ss-details-actions .ss-btn {
+.ss-export-trigger {
+	width: 100%;
 	justify-content: center;
+}
+
+.ss-export-menu {
+	position: absolute;
+	top: calc(100% + 6px);
+	left: 0;
+	right: 0;
+	z-index: 3000;
+	background: var(--surface);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	padding: 4px;
+	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
 }
 
 .ss-details-empty {

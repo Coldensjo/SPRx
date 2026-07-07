@@ -477,6 +477,7 @@ export default function ThingsView({
 	const [activeFilters, setActiveFilters] = useState<Set<string>>(new Set());
 	const [showFilters, setShowFilters] = useState(false);
 	const [filterSearch, setFilterSearch] = useState('');
+	const [showExportMenu, setShowExportMenu] = useState(false);
 
 	// Multi-selection. `selectedIds` is the full set; `anchorId` is the pivot
 	// for shift-range selection; `selectedId` (from props) stays the primary
@@ -731,6 +732,23 @@ export default function ThingsView({
 			window.removeEventListener('keydown', onKey);
 		};
 	}, [showFilters]);
+
+	// Close the export dropdown on an outside click or Escape.
+	useEffect(() => {
+		if (!showExportMenu) return;
+		const onDown = (e: MouseEvent) => {
+			if (!(e.target as HTMLElement).closest('.ss-export-dropdown')) setShowExportMenu(false);
+		};
+		const onKey = (e: KeyboardEvent) => {
+			if (e.key === 'Escape') setShowExportMenu(false);
+		};
+		window.addEventListener('mousedown', onDown);
+		window.addEventListener('keydown', onKey);
+		return () => {
+			window.removeEventListener('mousedown', onDown);
+			window.removeEventListener('keydown', onKey);
+		};
+	}, [showExportMenu]);
 
 	// Ctrl/Cmd+A selects everything; Escape clears the selection.
 	useEffect(() => {
@@ -1339,58 +1357,65 @@ export default function ThingsView({
 										))
 									)}
 								</div>
-								<div className="ss-details-actions">
+								<div className="ss-export-dropdown">
 									<button
-										className="ss-btn ss-btn-primary"
-										onClick={() => void doExport(detail.id, 'image')}
-										title="Export PNG…"
+										className="ss-btn ss-btn-primary ss-export-trigger"
+										onClick={() => setShowExportMenu(o => !o)}
+										title="Export…"
 									>
 										<FileImage size={14} />
-										Export PNG…
+										Export…
 									</button>
-									<button
-										className="ss-btn ss-btn-primary"
-										onClick={() => void doExport(detail.id, 'sheet')}
-										title="Export spritesheet…"
-									>
-										<Grid3X3 size={14} />
-										Export spritesheet…
-									</button>
-									{selectedIds.size > 1 && (
-										<>
+									{showExportMenu && (
+										<div className="ss-export-menu">
 											<button
-												className="ss-btn ss-btn-primary"
-												onClick={() => void exportCombinedSheet()}
-												title={`Export ${selectedIds.size} selected as one combined spritesheet…`}
+												className="ss-menu-item"
+												onClick={() => (setShowExportMenu(false), void exportSelected('image'))}
+											>
+												<FileImage size={14} />
+												{selectedIds.size > 1 ? `Export ${selectedIds.size} as PNGs…` : 'Export as PNG…'}
+											</button>
+											<button
+												className="ss-menu-item"
+												onClick={() => (setShowExportMenu(false), void exportSelected('sheet'))}
 											>
 												<Grid3X3 size={14} />
-												Export {selectedIds.size} as combined spritesheet…
+												{selectedIds.size > 1 ? `Export ${selectedIds.size} as spritesheets…` : 'Export as spritesheet…'}
 											</button>
-											<button
-												className="ss-btn"
-												onClick={() => void exportSelectedToZip('image')}
-												title={`Export ${selectedIds.size} selected as PNGs to zip…`}
-											>
-												<Archive size={14} />
-												Export {selectedIds.size} as PNGs to zip…
-											</button>
-											<button
-												className="ss-btn"
-												onClick={() => void exportSelectedToZip('sheet')}
-												title={`Export ${selectedIds.size} selected as spritesheets to zip…`}
-											>
-												<Archive size={14} />
-												Export {selectedIds.size} as sheets to zip…
-											</button>
-											<button
-												className="ss-btn"
-												onClick={() => void exportCombinedSheetToZipFn()}
-												title={`Export ${selectedIds.size} selected as combined spritesheet to zip…`}
-											>
-												<Archive size={14} />
-												Combined sheet to zip…
-											</button>
-										</>
+											{selectedIds.size > 1 && (
+												<>
+													<button
+														className="ss-menu-item"
+														onClick={() => (setShowExportMenu(false), void exportCombinedSheet())}
+													>
+														<Grid3X3 size={14} />
+														Export {selectedIds.size} as one combined spritesheet…
+													</button>
+													<div className="ss-menu-sep" />
+													<button
+														className="ss-menu-item"
+														onClick={() => (setShowExportMenu(false), void exportSelectedToZip('image'))}
+													>
+														<Archive size={14} />
+														Export {selectedIds.size} as PNGs to zip…
+													</button>
+													<button
+														className="ss-menu-item"
+														onClick={() => (setShowExportMenu(false), void exportSelectedToZip('sheet'))}
+													>
+														<Archive size={14} />
+														Export {selectedIds.size} as sheets to zip…
+													</button>
+													<button
+														className="ss-menu-item"
+														onClick={() => (setShowExportMenu(false), void exportCombinedSheetToZipFn())}
+													>
+														<Archive size={14} />
+														Combined sheet to zip…
+													</button>
+												</>
+											)}
+										</div>
 									)}
 								</div>
 							</div>
