@@ -1447,7 +1447,7 @@ pub fn compose_thing_sheet(
         .into_par_iter()
         .map(|(pz, py, px, l, frame)| {
             let cell = compose_from_decoded(&decoded, t, frame, px, py, pz, Some(l));
-            let ox = (px as usize + l as usize * t.pattern_x as usize) * cell_w;
+            let ox = (px as usize * t.layers as usize + l as usize) * cell_w;
             let oy = ((pz as usize * t.pattern_y as usize + py as usize) * t.frames as usize
                 + frame as usize)
                 * cell_h;
