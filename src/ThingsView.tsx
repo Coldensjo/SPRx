@@ -46,12 +46,19 @@ interface StructuralFilter {
 	key: string;
 	label: string;
 	test: (t: ThingSummary) => boolean;
+	/** When set, the filter is only offered for these categories. */
+	categories?: ThingCategory[];
 }
 
 const STRUCTURAL_FILTERS: StructuralFilter[] = [
 	{ key: 'animated', label: 'Animated', test: t => t.frames > 1 },
+	{ key: 'tile1x1', label: '1×1 tiles', test: t => t.width === 1 && t.height === 1 },
+	{ key: 'tile2x2', label: '2×2 tiles', test: t => t.width === 2 && t.height === 2 },
 	{ key: 'multiTile', label: 'Multi-tile', test: t => t.width > 1 || t.height > 1 },
-	{ key: 'layered', label: 'Layered', test: t => t.layers > 1 }
+	{ key: 'layered', label: 'Layered', test: t => t.layers > 1 },
+	// Player outfits carry an extra layer (the colorization template) that
+	// creature-only outfits lack.
+	{ key: 'playerOutfit', label: 'Player outfit', test: t => t.layers > 1, categories: ['outfit'] }
 ];
 
 function thingAnimates(frames: number, animateEnabled: boolean): boolean {
@@ -599,9 +606,12 @@ export default function ThingsView({
 	// Narrows the Structure/Properties lists shown in the filter popover; distinct
 	// from `matchFn`/`filterFn`, which narrow the grid itself.
 	const filterListQuery = filterSearch.trim().toLowerCase();
+	const categoryStructuralFilters = STRUCTURAL_FILTERS.filter(
+		f => !f.categories || f.categories.includes(category)
+	);
 	const visibleStructuralFilters = filterListQuery
-		? STRUCTURAL_FILTERS.filter(f => f.label.toLowerCase().includes(filterListQuery))
-		: STRUCTURAL_FILTERS;
+		? categoryStructuralFilters.filter(f => f.label.toLowerCase().includes(filterListQuery))
+		: categoryStructuralFilters;
 	const visibleProps = filterListQuery
 		? availableProps.filter(name => name.toLowerCase().includes(filterListQuery))
 		: availableProps;

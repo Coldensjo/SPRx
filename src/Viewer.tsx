@@ -4,7 +4,7 @@ import { join } from '@tauri-apps/api/path';
 import { Copy, FileImage, Grid3X3, Loader2, Search, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { atlasUrl, exportSprites, fetchFlags, OpenFile, parseSearch } from './spr';
 import type { Toast } from './App';
-import type { ExportSettings } from './settings';
+import { loadZoomIdx, saveZoomIdx, type ExportSettings } from './settings';
 
 const ZOOM_LEVELS = [32, 48, 64, 96];
 const GRID_PAD = 8;
@@ -107,7 +107,7 @@ export default function Viewer({ file, transparent, onTransparentChange, exportS
 	const [flagsError, setFlagsError] = useState<string | null>(null);
 	const [category, setCategory] = useState<Category>('all');
 	const [search, setSearch] = useState('');
-	const [zoomIdx, setZoomIdx] = useState(2);
+	const [zoomIdx, setZoomIdx] = useState(() => loadZoomIdx('sprites', 2, ZOOM_LEVELS.length - 1));
 	const [selected, setSelected] = useState<Set<number>>(new Set());
 	const [anchor, setAnchor] = useState<number | null>(null);
 	const [hoverId, setHoverId] = useState<number | null>(null);
@@ -118,6 +118,8 @@ export default function Viewer({ file, transparent, onTransparentChange, exportS
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const [scrollTop, setScrollTop] = useState(0);
 	const [viewport, setViewport] = useState({ w: 0, h: 0 });
+
+	useEffect(() => saveZoomIdx('sprites', zoomIdx), [zoomIdx]);
 
 	const zoom = ZOOM_LEVELS[zoomIdx];
 	const cellW = zoom + 14;
@@ -267,7 +269,7 @@ export default function Viewer({ file, transparent, onTransparentChange, exportS
 
 	const exportSingle = useCallback(
 		async (id: number) => {
-			const filename = `sprite_${id}.png`;
+			const filename = `${id}_sprite.png`;
 			let out: string | null;
 			if (fixedFolder) {
 				out = await join(fixedFolder, filename);
@@ -296,7 +298,9 @@ export default function Viewer({ file, transparent, onTransparentChange, exportS
 	const confirmSheetExport = useCallback(async () => {
 		if (!exportState) return;
 		const cols = Math.max(1, Math.min(256, parseInt(exportState.cols, 10) || 1));
-		const filename = 'spritesheet.png';
+		const ids = exportState.ids;
+		const idPart = ids.length > 1 ? `${ids[0]}-${ids[ids.length - 1]}` : `${ids[0]}`;
+		const filename = `${idPart}_spritesheet.png`;
 		let out: string | null;
 		if (fixedFolder) {
 			out = await join(fixedFolder, filename);

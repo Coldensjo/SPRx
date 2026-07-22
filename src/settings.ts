@@ -58,6 +58,25 @@ export function loadExportSettings(): ExportSettings {
 	}
 }
 
+/** Loads the persisted zoom-level index for a view, falling back when missing or out of range. */
+export function loadZoomIdx(view: string, fallback: number, max: number): number {
+	try {
+		const raw = localStorage.getItem(`sprx.zoom.${view}`);
+		const n = raw === null ? NaN : Number(raw);
+		return Number.isInteger(n) && n >= 0 && n <= max ? n : fallback;
+	} catch {
+		return fallback;
+	}
+}
+
+export function saveZoomIdx(view: string, idx: number): void {
+	try {
+		localStorage.setItem(`sprx.zoom.${view}`, String(idx));
+	} catch {
+		// Ignore storage failures (private mode, quota); zoom is non-critical.
+	}
+}
+
 export function saveExportSettings(settings: ExportSettings): void {
 	try {
 		localStorage.setItem(EXPORT_KEY, JSON.stringify(settings));
