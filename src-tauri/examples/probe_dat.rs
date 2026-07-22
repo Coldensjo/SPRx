@@ -41,9 +41,17 @@ fn main() {
     );
 
     let (frame, px, py, pz) = dat::preview_pattern(outfit);
-    let cell = dat::compose_thing_cell(&mut spr, &spr_path, outfit, frame, px, py, pz, None, false)
+    let cell = dat::compose_thing_cell(&mut spr, &spr_path, outfit, frame, px, py, pz, None, 0, false)
         .expect("compose cell failed");
     std::fs::write(format!("{}/outfit_{}.png", out_dir, outfit.id), dat::encode_png(&cell).unwrap()).unwrap();
+
+    // Outfits with pattern_y > 1 carry addons; render the base with both addons blended in.
+    if outfit.pattern_y > 1 {
+        let full = dat::compose_thing_cell(&mut spr, &spr_path, outfit, frame, px, py, pz, None, 3, false)
+            .expect("compose addons failed");
+        std::fs::write(format!("{}/outfit_{}_addons.png", out_dir, outfit.id), dat::encode_png(&full).unwrap()).unwrap();
+        println!("outfit addons: wrote outfit_{}_addons.png", outfit.id);
+    }
 
     let sheet = dat::compose_thing_sheet(&mut spr, &spr_path, outfit, false).expect("compose sheet failed");
     std::fs::write(format!("{}/outfit_{}_sheet.png", out_dir, outfit.id), dat::encode_png(&sheet).unwrap()).unwrap();
@@ -60,7 +68,7 @@ fn main() {
         item.id, item.width, item.height, item.frames, item.name
     );
     let (frame, px, py, pz) = dat::preview_pattern(item);
-    let cell = dat::compose_thing_cell(&mut spr, &spr_path, item, frame, px, py, pz, None, false)
+    let cell = dat::compose_thing_cell(&mut spr, &spr_path, item, frame, px, py, pz, None, 0, false)
         .expect("compose item failed");
     std::fs::write(format!("{}/item_{}.png", out_dir, item.id), dat::encode_png(&cell).unwrap()).unwrap();
 

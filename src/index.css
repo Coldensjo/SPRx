@@ -192,7 +192,7 @@ button {
 	gap: 10px;
 	width: 100%;
 	padding: 7px 16px;
-	font-size: 13px;
+	font-size: 14px;
 	color: var(--text-muted);
 	border-left: 2px solid transparent;
 	transition: color 120ms ease, background 120ms ease;
@@ -927,6 +927,13 @@ button {
 	background: var(--accent);
 	border-color: var(--accent);
 	color: var(--accent-text);
+}
+
+/* Addon toggles reuse the direction-button look but hold a word, not a letter. */
+.ss-addon-btn {
+	width: auto;
+	padding: 0 12px;
+	white-space: nowrap;
 }
 
 /* ---------- Grid ---------- */

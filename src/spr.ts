@@ -111,9 +111,10 @@ export async function exportThing(
 	mode: 'image' | 'sheet',
 	transparent: boolean,
 	outPath: string,
-	unique?: boolean
+	unique?: boolean,
+	addons?: number
 ): Promise<string> {
-	return invoke<string>('export_thing', { sprPath, datPath, category, id, mode, transparent, outPath, unique });
+	return invoke<string>('export_thing', { sprPath, datPath, category, id, mode, addons, transparent, outPath, unique });
 }
 
 /** Exports a thing's animation as a looping GIF. `dir` selects the outfit
@@ -128,7 +129,8 @@ export async function exportThingGif(
 	skipFirstFrame: boolean,
 	transparent: boolean,
 	outPath: string,
-	unique?: boolean
+	unique?: boolean,
+	addons?: number
 ): Promise<string> {
 	return invoke<string>('export_thing_gif', {
 		sprPath,
@@ -136,6 +138,7 @@ export async function exportThingGif(
 		category,
 		id,
 		dir,
+		addons,
 		skipFirstFrame,
 		transparent,
 		outPath,
@@ -156,7 +159,8 @@ export async function exportThings(
 	mode: 'image' | 'sheet',
 	transparent: boolean,
 	outDir: string,
-	unique?: boolean
+	unique?: boolean,
+	addons?: number
 ): Promise<ExportThingsResult> {
 	return invoke<ExportThingsResult>('export_things', {
 		sprPath,
@@ -164,6 +168,7 @@ export async function exportThings(
 		category,
 		ids,
 		mode,
+		addons,
 		transparent,
 		outDir,
 		unique
@@ -216,7 +221,8 @@ export async function exportThingsToZip(
 	mode: 'image' | 'sheet',
 	transparent: boolean,
 	outPath: string,
-	unique?: boolean
+	unique?: boolean,
+	addons?: number
 ): Promise<string> {
 	return invoke<string>('export_things_to_zip', {
 		sprPath,
@@ -224,6 +230,7 @@ export async function exportThingsToZip(
 		category,
 		ids,
 		mode,
+		addons,
 		transparent,
 		outPath,
 		unique
@@ -264,7 +271,9 @@ export function thingUrl(
 	frame?: number,
 	dir?: number,
 	diry?: number,
-	patz?: number
+	patz?: number,
+	/** Outfit addon bitmask blended over the base: 1 = first addon, 2 = second. */
+	addons?: number
 ): string {
 	const q = new URLSearchParams({
 		path: spr.path,
@@ -278,6 +287,7 @@ export function thingUrl(
 	if (dir !== undefined) q.set('dir', String(dir));
 	if (diry !== undefined) q.set('diry', String(diry));
 	if (patz !== undefined) q.set('patz', String(patz));
+	if (addons) q.set('addons', String(addons));
 	return `${protocolBase}/thing.png?${q.toString()}`;
 }
 
@@ -290,7 +300,8 @@ export function thingsRowUrl(
 	cell: number,
 	transparent: boolean,
 	frame = 0,
-	animate = false
+	animate = false,
+	addons = 0
 ): string {
 	const q = new URLSearchParams({
 		path: spr.path,
@@ -303,6 +314,7 @@ export function thingsRowUrl(
 		anim: animate ? '1' : '0',
 		v: String(dat.cacheKey)
 	});
+	if (addons) q.set('addons', String(addons));
 	return `${protocolBase}/things.png?${q.toString()}`;
 }
 

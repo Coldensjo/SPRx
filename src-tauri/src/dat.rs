@@ -1189,6 +1189,22 @@ fn cell_layers(t: &Thing, layer: Option<u32>) -> Vec<u32> {
     }
 }
 
+/// Pattern-Y indices a cell blends, bottom-up. Outfits use the Y axis for
+/// addons (index 0 = base outfit, 1 = first addon, 2 = second addon), so an
+/// `addons` bitmask (1 | 2) stacks the selected addon overlays on top of `py`.
+/// Non-outfits render just `py`.
+fn cell_pattern_ys(t: &Thing, py: u32, addons: u32) -> Vec<u32> {
+    let mut pys = vec![py];
+    if t.is_outfit {
+        for (bit, addon_py) in [(1u32, 1u32), (2, 2)] {
+            if addons & bit != 0 && addon_py < t.pattern_y as u32 && addon_py != py {
+                pys.push(addon_py);
+            }
+        }
+    }
+    pys
+}
+
 /// Sprite ids one cell needs (skips empty slots).
 fn cell_sprite_ids(
     t: &Thing,
@@ -1197,17 +1213,20 @@ fn cell_sprite_ids(
     py: u32,
     pz: u32,
     layer: Option<u32>,
+    addons: u32,
     out: &mut Vec<u32>,
 ) {
-    for &l in &cell_layers(t, layer) {
-        for ty in 0..t.height as u32 {
-            for tx in 0..t.width as u32 {
-                if let Some(&sid) = t
-                    .sprite_index
-                    .get(sprite_slot(t, frame, pz, py, px, l, ty, tx))
-                {
-                    if sid != 0 {
-                        out.push(sid);
+    for &p in &cell_pattern_ys(t, py, addons) {
+        for &l in &cell_layers(t, layer) {
+            for ty in 0..t.height as u32 {
+                for tx in 0..t.width as u32 {
+                    if let Some(&sid) = t
+                        .sprite_index
+                        .get(sprite_slot(t, frame, pz, p, px, l, ty, tx))
+                    {
+                        if sid != 0 {
+                            out.push(sid);
+                        }
                     }
                 }
             }
@@ -1225,6 +1244,7 @@ pub fn compose_from_decoded(
     py: u32,
     pz: u32,
     layer: Option<u32>,
+    addons: u32,
 ) -> ThingRender {
     let w = t.width as usize;
     let h = t.height as usize;
@@ -1232,23 +1252,25 @@ pub fn compose_from_decoded(
     let canvas_h = h * TILE;
     let mut canvas = vec![0u8; canvas_w * canvas_h * 4];
 
-    for &l in &cell_layers(t, layer) {
-        for ty in 0..h as u32 {
-            for tx in 0..w as u32 {
-                let slot = sprite_slot(t, frame, pz, py, px, l, ty, tx);
-                let Some(&sid) = t.sprite_index.get(slot) else {
-                    continue;
-                };
-                if sid == 0 {
-                    continue;
+    for &p in &cell_pattern_ys(t, py, addons) {
+        for &l in &cell_layers(t, layer) {
+            for ty in 0..h as u32 {
+                for tx in 0..w as u32 {
+                    let slot = sprite_slot(t, frame, pz, p, px, l, ty, tx);
+                    let Some(&sid) = t.sprite_index.get(slot) else {
+                        continue;
+                    };
+                    if sid == 0 {
+                        continue;
+                    }
+                    let Some(tile) = decoded.get(&sid) else {
+                        continue;
+                    };
+                    debug_assert_eq!(tile.len(), TILE_BYTES);
+                    let dst_x = (w - 1 - tx as usize) * TILE;
+                    let dst_y = (h - 1 - ty as usize) * TILE;
+                    blend_tile(&mut canvas, canvas_w, dst_x, dst_y, tile);
                 }
-                let Some(tile) = decoded.get(&sid) else {
-                    continue;
-                };
-                debug_assert_eq!(tile.len(), TILE_BYTES);
-                let dst_x = (w - 1 - tx as usize) * TILE;
-                let dst_y = (h - 1 - ty as usize) * TILE;
-                blend_tile(&mut canvas, canvas_w, dst_x, dst_y, tile);
             }
         }
     }
@@ -1275,6 +1297,7 @@ fn read_decoded(
         .collect())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn compose_thing_cell(
     spr: &SprManager,
     spr_path: &str,
@@ -1284,12 +1307,15 @@ pub fn compose_thing_cell(
     py: u32,
     pz: u32,
     layer: Option<u32>,
+    addons: u32,
     transparent: bool,
 ) -> Result<ThingRender, String> {
     let mut ids = Vec::new();
-    cell_sprite_ids(t, frame, px, py, pz, layer, &mut ids);
+    cell_sprite_ids(t, frame, px, py, pz, layer, addons, &mut ids);
     let decoded = read_decoded(spr, spr_path, &ids, transparent)?;
-    Ok(compose_from_decoded(&decoded, t, frame, px, py, pz, layer))
+    Ok(compose_from_decoded(
+        &decoded, t, frame, px, py, pz, layer, addons,
+    ))
 }
 
 /// Nearest-neighbor blit of `src` into `dst`, scaled to fit and centered in a
@@ -1325,6 +1351,7 @@ fn blit_scaled_into_cell(
 
 /// Composes a horizontal strip of thing previews, one `cell`×`cell` square per
 /// thing, in the given order. One request per grid row instead of per thing.
+#[allow(clippy::too_many_arguments)]
 pub fn compose_things_row(
     spr: &SprManager,
     spr_path: &str,
@@ -1332,6 +1359,7 @@ pub fn compose_things_row(
     cell: u32,
     global_frame: u32,
     animate_enabled: bool,
+    addons: u32,
     transparent: bool,
 ) -> Result<ThingRender, String> {
     use rayon::prelude::*;
@@ -1341,7 +1369,7 @@ pub fn compose_things_row(
     for t in things {
         let frame = preview_frame(t, global_frame, animate_enabled);
         let (_, px, py, pz) = preview_pattern(t);
-        cell_sprite_ids(t, frame, px, py, pz, None, &mut all_ids);
+        cell_sprite_ids(t, frame, px, py, pz, None, addons, &mut all_ids);
     }
     let decoded = read_decoded(spr, spr_path, &all_ids, transparent)?;
 
@@ -1350,7 +1378,7 @@ pub fn compose_things_row(
         .map(|t| {
             let frame = preview_frame(t, global_frame, animate_enabled);
             let (_, px, py, pz) = preview_pattern(t);
-            compose_from_decoded(&decoded, t, frame, px, py, pz, None)
+            compose_from_decoded(&decoded, t, frame, px, py, pz, None, addons)
         })
         .collect();
 
@@ -1446,7 +1474,7 @@ pub fn compose_thing_sheet(
     let rendered: Vec<(usize, usize, ThingRender)> = cells
         .into_par_iter()
         .map(|(pz, py, px, l, frame)| {
-            let cell = compose_from_decoded(&decoded, t, frame, px, py, pz, Some(l));
+            let cell = compose_from_decoded(&decoded, t, frame, px, py, pz, Some(l), 0);
             let ox = (px as usize * t.layers as usize + l as usize) * cell_w;
             let oy = ((pz as usize * t.pattern_y as usize + py as usize) * t.frames as usize
                 + frame as usize)
@@ -1589,6 +1617,7 @@ pub fn compose_things_sheet(
 /// callers pass 0 for things without directional patterns. When
 /// `skip_first_frame` is set, frame 0 (the outfit's standing pose) is left
 /// out so the GIF loops over just the walking frames.
+#[allow(clippy::too_many_arguments)]
 pub fn compose_thing_gif(
     spr: &SprManager,
     spr_path: &str,
@@ -1596,6 +1625,7 @@ pub fn compose_thing_gif(
     px: u32,
     py: u32,
     pz: u32,
+    addons: u32,
     transparent: bool,
     delay_ms: u32,
     skip_first_frame: bool,
@@ -1607,11 +1637,11 @@ pub fn compose_thing_gif(
 
     let mut ids = Vec::new();
     for frame in start..t.frames as u32 {
-        cell_sprite_ids(t, frame, px, py, pz, None, &mut ids);
+        cell_sprite_ids(t, frame, px, py, pz, None, addons, &mut ids);
     }
     let decoded = read_decoded(spr, spr_path, &ids, transparent)?;
     let renders: Vec<ThingRender> = (start..t.frames as u32)
-        .map(|frame| compose_from_decoded(&decoded, t, frame, px, py, pz, None))
+        .map(|frame| compose_from_decoded(&decoded, t, frame, px, py, pz, None, addons))
         .collect();
     encode_gif(&renders, delay_ms)
 }

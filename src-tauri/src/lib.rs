@@ -147,6 +147,7 @@ fn get_thing(
 /// Exports a thing as PNG. `mode`: "image" = composed preview cell (first
 /// frame), "sheet" = full spritesheet (patterns×layers wide, frames×patterns×mount tall).
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 fn export_thing(
     spr_state: State<SprManagerState>,
     dat_state: State<DatManagerState>,
@@ -155,6 +156,7 @@ fn export_thing(
     category: String,
     id: u32,
     mode: String,
+    addons: Option<u32>,
     transparent: bool,
     out_path: String,
     unique: Option<bool>,
@@ -181,6 +183,7 @@ fn export_thing(
                 py,
                 pz,
                 None,
+                addons.unwrap_or(0),
                 transparent,
             )?
         }
@@ -209,6 +212,7 @@ fn export_thing_gif(
     category: String,
     id: u32,
     dir: Option<u32>,
+    addons: Option<u32>,
     skip_first_frame: Option<bool>,
     transparent: bool,
     out_path: String,
@@ -231,6 +235,7 @@ fn export_thing_gif(
         px,
         0,
         0,
+        addons.unwrap_or(0),
         transparent,
         220,
         skip_first_frame.unwrap_or(false),
@@ -257,6 +262,7 @@ fn export_things(
     category: String,
     ids: Vec<u32>,
     mode: String,
+    addons: Option<u32>,
     transparent: bool,
     out_dir: String,
     unique: Option<bool>,
@@ -298,12 +304,13 @@ fn export_things(
                             py,
                             pz,
                             None,
+                            addons.unwrap_or(0),
                             transparent,
                         )?
                     }
                 };
                 let png = dat::encode_png(&render)?;
-                let out_path = out_dir.join(format!("{}_{}_{}.png", category, id, suffix));
+                let out_path = out_dir.join(format!("{}_{}_{}.png", id, category, suffix));
                 let out_path = if unique.unwrap_or(false) {
                     unique_output_path(out_path)
                 } else {
@@ -499,6 +506,7 @@ fn export_things_to_zip(
     category: String,
     ids: Vec<u32>,
     mode: String,
+    addons: Option<u32>,
     transparent: bool,
     out_path: String,
     unique: Option<bool>,
@@ -544,12 +552,13 @@ fn export_things_to_zip(
                         py,
                         pz,
                         None,
+                        addons.unwrap_or(0),
                         transparent,
                     )?
                 }
             };
             let png = dat::encode_png(&render)?;
-            let filename = format!("{}_{:04}_{}.png", category, id, suffix);
+            let filename = format!("{:04}_{}_{}.png", id, category, suffix);
             zip.start_file(&filename, options)
                 .map_err(|e| format!("Failed to add file to zip: {}", e))?;
             zip.write_all(&png)
@@ -616,7 +625,13 @@ fn export_combined_sheet_to_zip(
         let mut cursor = std::io::Cursor::new(&mut zip_buffer);
         let mut zip = ZipWriter::new(&mut cursor);
         let options = zip::write::FileOptions::default();
-        let filename = format!("{}_{}_combined_sheet.png", category, ids.len());
+        let filename = match (ids.first(), ids.last()) {
+            (Some(first), Some(last)) if first != last => {
+                format!("{}-{}_{}_combined_sheet.png", first, last, category)
+            }
+            (Some(first), _) => format!("{}_{}_combined_sheet.png", first, category),
+            _ => format!("{}_combined_sheet.png", category),
+        };
         zip.start_file(&filename, options)
             .map_err(|e| format!("Failed to add file to zip: {}", e))?;
         zip.write_all(&png)

@@ -21,7 +21,7 @@ import {
 	thingUrl
 } from './spr';
 import type { Toast } from './App';
-import type { ExportSettings } from './settings';
+import { loadZoomIdx, saveZoomIdx, type ExportSettings } from './settings';
 
 const ZOOM_LEVELS = [48, 64, 96, 128];
 const GRID_PAD = 8;
@@ -115,6 +115,8 @@ interface RowProps {
 	transparent: boolean;
 	gridFrame: number;
 	animateEnabled: boolean;
+	/** Outfit addon bitmask blended over each base outfit (1 = first, 2 = second). */
+	addons: number;
 	selectedId: number | null;
 	selectedIds: Set<number>;
 	onCellMouseDown: (e: React.MouseEvent, id: number) => void;
@@ -161,7 +163,8 @@ const AnimatedThingCell = memo(function AnimatedThingCell({
 	transparent,
 	frame,
 	dir,
-	diry
+	diry,
+	addons
 }: {
 	spr: OpenFile;
 	dat: OpenDat;
@@ -172,6 +175,7 @@ const AnimatedThingCell = memo(function AnimatedThingCell({
 	frame: number;
 	dir?: number;
 	diry?: number;
+	addons?: number;
 }) {
 	// Outfits: frame 0 is the standing pose, so loop the walking frames (1..n-1).
 	const start = category === 'outfit' && thing.frames > 1 ? 1 : 0;
@@ -181,7 +185,7 @@ const AnimatedThingCell = memo(function AnimatedThingCell({
 			{Array.from({ length: thing.frames }, (_, f) => (
 				<img
 					key={f}
-					src={thingUrl(spr, dat, category, thing.id, transparent, f, dir, diry)}
+					src={thingUrl(spr, dat, category, thing.id, transparent, f, dir, diry, undefined, addons)}
 					style={{ display: f === shown ? 'block' : 'none' }}
 					width={zoom}
 					height={zoom}
@@ -201,7 +205,8 @@ const StaticThingCell = memo(function StaticThingCell({
 	zoom,
 	transparent,
 	dir,
-	diry
+	diry,
+	addons
 }: {
 	spr: OpenFile;
 	dat: OpenDat;
@@ -211,11 +216,12 @@ const StaticThingCell = memo(function StaticThingCell({
 	transparent: boolean;
 	dir?: number;
 	diry?: number;
+	addons?: number;
 }) {
 	return (
 		<div className="ss-cell-sprite" style={{ width: zoom, height: zoom }}>
 			<img
-				src={thingUrl(spr, dat, category, thing.id, transparent, 0, dir, diry)}
+				src={thingUrl(spr, dat, category, thing.id, transparent, 0, dir, diry, undefined, addons)}
 				width={zoom}
 				height={zoom}
 				draggable={false}
@@ -353,6 +359,7 @@ const ThingRow = memo(function ThingRow({
 	transparent,
 	gridFrame,
 	animateEnabled,
+	addons,
 	selectedId,
 	selectedIds,
 	onCellMouseDown,
@@ -370,7 +377,10 @@ const ThingRow = memo(function ThingRow({
 					category,
 					things.map(t => t.id),
 					zoom,
-					transparent
+					transparent,
+					0,
+					false,
+					addons
 				);
 	return (
 		<div className="ss-grid-row" style={{ top, paddingLeft: GRID_PAD }}>
@@ -404,6 +414,7 @@ const ThingRow = memo(function ThingRow({
 							zoom={zoom}
 							transparent={transparent}
 							frame={gridFrame}
+							addons={addons}
 						/>
 					) : atlasUrl ? (
 						<div
@@ -425,6 +436,7 @@ const ThingRow = memo(function ThingRow({
 							thing={cell.thing}
 							zoom={zoom}
 							transparent={transparent}
+							addons={addons}
 						/>
 					)}
 					<div className="ss-cell-id">{cell.label}</div>
@@ -469,12 +481,16 @@ export default function ThingsView({
 	const [things, setThings] = useState<ThingSummary[] | null>(null);
 	const [loadError, setLoadError] = useState<string | null>(null);
 	const [search, setSearch] = useState('');
-	const [zoomIdx, setZoomIdx] = useState(1);
+	const [zoomIdx, setZoomIdx] = useState(() => loadZoomIdx('things', 1, ZOOM_LEVELS.length - 1));
 	const [detail, setDetail] = useState<ThingDetail | null>(null);
 	const [menu, setMenu] = useState<MenuState | null>(null);
 	const [playing, setPlaying] = useState(true);
 	const [frame, setFrame] = useState(0);
 	const [dir, setDir] = useState(2); // south
+	// Outfit addon bitmask (1 = first addon, 2 = second), blended over the base
+	// outfit in previews and single-cell exports. Only meaningful for outfits;
+	// both addons are shown by default and toggled off per addon.
+	const [addons, setAddons] = useState(3);
 	const [animateEnabled, setAnimateEnabled] = useState(() => defaultAnimateEnabled(category));
 	const [showAllMissileDirections, setShowAllMissileDirections] = useState(false);
 	const [gridFrame, setGridFrame] = useState(0);
@@ -509,7 +525,11 @@ export default function ThingsView({
 	const [scrollTop, setScrollTop] = useState(0);
 	const [viewport, setViewport] = useState({ w: 0, h: 0 });
 
+	useEffect(() => saveZoomIdx('things', zoomIdx), [zoomIdx]);
+
 	const zoom = ZOOM_LEVELS[zoomIdx];
+	// Addons only ever apply to outfits; other categories always pass mask 0.
+	const outfitAddons = category === 'outfit' ? addons : 0;
 	const showMissileDirectionGrids = category === 'missile' && showAllMissileDirections;
 	const cellW = (showMissileDirectionGrids ? zoom * 3 : zoom) + 16;
 	const cellH = (showMissileDirectionGrids ? zoom * 3 : zoom) + 16 + 16;
@@ -940,7 +960,7 @@ export default function ThingsView({
 	const doExport = useCallback(
 		async (id: number, mode: 'image' | 'sheet') => {
 			const suffix = mode === 'sheet' ? 'sheet' : 'image';
-			const filename = `${category}_${id}_${suffix}.png`;
+			const filename = `${id}_${category}_${suffix}.png`;
 			let out: string | null;
 			if (fixedFolder) {
 				out = await join(fixedFolder, filename);
@@ -952,19 +972,19 @@ export default function ThingsView({
 			}
 			if (!out) return;
 			try {
-				await exportThing(spr.path, dat.path, category, id, mode, transparent, out, !!fixedFolder);
+				await exportThing(spr.path, dat.path, category, id, mode, transparent, out, !!fixedFolder, outfitAddons);
 				showToast('ok', `Exported ${category} ${id} (${mode === 'sheet' ? 'spritesheet' : 'image'})`);
 			} catch (e) {
 				showToast('error', String(e));
 			}
 		},
-		[spr.path, dat.path, category, transparent, fixedFolder, showToast]
+		[spr.path, dat.path, category, transparent, fixedFolder, outfitAddons, showToast]
 	);
 
 	// Exports one thing's animation as a looping GIF at a fixed direction.
 	const doExportGif = useCallback(
 		async (id: number, dir: number | undefined, skipFirstFrame: boolean) => {
-			const filename = `${category}_${id}.gif`;
+			const filename = `${id}_${category}.gif`;
 			let out: string | null;
 			if (fixedFolder) {
 				out = await join(fixedFolder, filename);
@@ -976,13 +996,24 @@ export default function ThingsView({
 			}
 			if (!out) return;
 			try {
-				await exportThingGif(spr.path, dat.path, category, id, dir, skipFirstFrame, transparent, out, !!fixedFolder);
+				await exportThingGif(
+					spr.path,
+					dat.path,
+					category,
+					id,
+					dir,
+					skipFirstFrame,
+					transparent,
+					out,
+					!!fixedFolder,
+					outfitAddons
+				);
 				showToast('ok', `Exported ${category} ${id} (GIF)`);
 			} catch (e) {
 				showToast('error', String(e));
 			}
 		},
-		[spr.path, dat.path, category, transparent, fixedFolder, showToast]
+		[spr.path, dat.path, category, transparent, fixedFolder, outfitAddons, showToast]
 	);
 
 	// Exports every selected thing into a chosen folder, one PNG per id.
@@ -1005,7 +1036,8 @@ export default function ThingsView({
 					mode,
 					transparent,
 					dir,
-					!!fixedFolder
+					!!fixedFolder,
+					outfitAddons
 				);
 				if (failed.length === 0) {
 					showToast('ok', `Exported ${exported} ${category}${exported !== 1 ? 's' : ''} to ${dir}`);
@@ -1019,7 +1051,7 @@ export default function ThingsView({
 				showToast('error', String(e));
 			}
 		},
-		[doExport, spr.path, dat.path, category, transparent, fixedFolder, showToast]
+		[doExport, spr.path, dat.path, category, transparent, fixedFolder, outfitAddons, showToast]
 	);
 
 	// Exports the selected things into a single combined spritesheet PNG using
@@ -1032,7 +1064,8 @@ export default function ThingsView({
 			spacing: exportSettings.spacing,
 			align: exportSettings.align
 		};
-		const filename = `${category}_${ids.length}_sheet.png`;
+		const idPart = ids.length > 1 ? `${ids[0]}-${ids[ids.length - 1]}` : `${ids[0]}`;
+		const filename = `${idPart}_${category}_sheet.png`;
 		let out: string | null;
 		if (fixedFolder) {
 			out = await join(fixedFolder, filename);
@@ -1059,7 +1092,7 @@ export default function ThingsView({
 			if (ids.length === 1) {
 				// For single item, still create a zip (contains one file)
 				const suffix = mode === 'sheet' ? 'sheet' : 'image';
-				const filename = `${category}_${ids[0]}_${suffix}.zip`;
+				const filename = `${ids[0]}_${category}_${suffix}.zip`;
 				let out: string | null;
 				if (fixedFolder) {
 					out = await join(fixedFolder, filename);
@@ -1071,7 +1104,7 @@ export default function ThingsView({
 				}
 				if (!out) return;
 				try {
-					await exportThingsToZip(spr.path, dat.path, category, ids, mode, transparent, out, !!fixedFolder);
+					await exportThingsToZip(spr.path, dat.path, category, ids, mode, transparent, out, !!fixedFolder, outfitAddons);
 					showToast('ok', `Exported ${category} ${ids[0]} to zip`);
 				} catch (e) {
 					showToast('error', String(e));
@@ -1079,7 +1112,7 @@ export default function ThingsView({
 				return;
 			}
 			const suffix = mode === 'sheet' ? 'sheets' : 'images';
-			const filename = `${category}_${ids.length}_${suffix}.zip`;
+			const filename = `${ids[0]}-${ids[ids.length - 1]}_${category}_${suffix}.zip`;
 			let out: string | null;
 			if (fixedFolder) {
 				out = await join(fixedFolder, filename);
@@ -1091,13 +1124,13 @@ export default function ThingsView({
 			}
 			if (!out) return;
 			try {
-				await exportThingsToZip(spr.path, dat.path, category, ids, mode, transparent, out, !!fixedFolder);
+				await exportThingsToZip(spr.path, dat.path, category, ids, mode, transparent, out, !!fixedFolder, outfitAddons);
 				showToast('ok', `Exported ${ids.length} ${category}${ids.length !== 1 ? 's' : ''} to zip`);
 			} catch (e) {
 				showToast('error', String(e));
 			}
 		},
-		[spr.path, dat.path, category, transparent, fixedFolder, showToast]
+		[spr.path, dat.path, category, transparent, fixedFolder, outfitAddons, showToast]
 	);
 
 	// Exports the selected things into a combined spritesheet and saves it in a zip.
@@ -1109,7 +1142,8 @@ export default function ThingsView({
 			spacing: exportSettings.spacing,
 			align: exportSettings.align
 		};
-		const filename = `${category}_${ids.length}_combined_sheet.zip`;
+		const idPart = ids.length > 1 ? `${ids[0]}-${ids[ids.length - 1]}` : `${ids[0]}`;
+		const filename = `${idPart}_${category}_combined_sheet.zip`;
 		let out: string | null;
 		if (fixedFolder) {
 			out = await join(fixedFolder, filename);
@@ -1270,6 +1304,13 @@ export default function ThingsView({
 					Animate
 				</label>
 
+				{category === 'outfit' && (things ?? []).some(t => t.patternY > 1) && (
+					<label className="ss-toggle" title="Blend outfit addons over the base outfit">
+						<input type="checkbox" checked={addons !== 0} onChange={e => setAddons(e.target.checked ? 3 : 0)} />
+						Addons
+					</label>
+				)}
+
 				{category === 'missile' && (
 					<label className="ss-toggle">
 						<input
@@ -1326,6 +1367,7 @@ export default function ThingsView({
 								transparent={transparent}
 								gridFrame={gridFrame}
 								animateEnabled={animateEnabled}
+								addons={outfitAddons}
 								selectedId={selectedId}
 								selectedIds={selectedIds}
 								onCellMouseDown={handleCellMouseDown}
@@ -1381,7 +1423,18 @@ export default function ThingsView({
 										Array.from({ length: detail.frames }).map((_, f) => (
 											<img
 												key={f}
-												src={thingUrl(spr, dat, category, detail.id, transparent, f, showDirs ? dir : undefined)}
+												src={thingUrl(
+													spr,
+													dat,
+													category,
+													detail.id,
+													transparent,
+													f,
+													showDirs ? dir : undefined,
+													undefined,
+													undefined,
+													outfitAddons
+												)}
 												style={{
 													imageRendering: 'pixelated',
 													display: f === frame ? 'block' : 'none'
@@ -1494,6 +1547,23 @@ export default function ThingsView({
 												{label[0]}
 											</button>
 										))}
+									</div>
+								)}
+								{detail.isOutfit && detail.patternY > 1 && (
+									<div className="ss-details-dirs">
+										{Array.from({ length: Math.min(2, detail.patternY - 1) }, (_, i) => {
+											const bit = 1 << i;
+											return (
+												<button
+													key={bit}
+													className={`ss-dir-btn ss-addon-btn ${addons & bit ? 'ss-dir-btn-active' : ''}`}
+													onClick={() => setAddons(a => a ^ bit)}
+													title={`Toggle addon ${i + 1}`}
+												>
+													Addon {i + 1}
+												</button>
+											);
+										})}
 									</div>
 								)}
 								{detail.name && <div className="ss-details-name">“{detail.name}”</div>}
